@@ -757,6 +757,7 @@ class FetchEnh {
       page,
       pageSize,
       limit,
+      maxPages = 100,
       extractor,
     } = options;
 
@@ -788,7 +789,7 @@ class FetchEnh {
         if (
           (limit && results.length >= limit) ||
           pageItems.length < pageSize ||
-          iterations++ >= 100
+          ++iterations >= maxPages
         ) {
           break;
         }
@@ -829,6 +830,7 @@ class FetchEnh {
     query?: Record<string, any>;
     responseType?: string;
     limit?: number;
+    maxPages?: number;
     cursor?: string | null;
     cursorParamName?: string;
     getNextCursor?: (response: any, headers: Headers) => string | null;
@@ -841,6 +843,7 @@ class FetchEnh {
       query = {},
       responseType = 'json',
       limit,
+      maxPages = 100,
       cursor: initialCursor = null,
       cursorParamName = 'cursor',
       getNextCursor,
@@ -892,7 +895,7 @@ class FetchEnh {
       results = results.concat(pageItems);
       if (limit && results.length >= limit) break;
 
-      if (!nextCursor || pageItems.length === 0 || iterations++ > 200) break;
+      if (!nextCursor || pageItems.length === 0 || ++iterations >= maxPages) break;
       cursor = nextCursor;
     }
 
@@ -918,6 +921,8 @@ class FetchEnh {
       page,
       pageSize,
       limit,
+      maxPages,
+      extractor,
       options: perCallOptions,
     } = options;
 
@@ -939,6 +944,8 @@ class FetchEnh {
         page,
         pageSize,
         limit,
+        maxPages,
+        extractor,
         responseType,
       }) as Promise<T>;
     } else if (options.cursor !== undefined || options.getNextCursor || options.useLinkHeader) {
@@ -948,11 +955,12 @@ class FetchEnh {
         query: originalQuery,
         responseType,
         limit,
+        maxPages,
         cursor: options.cursor ?? null,
         cursorParamName: options.cursorParamName ?? 'cursor',
         getNextCursor: options.getNextCursor,
         useLinkHeader: options.useLinkHeader,
-        extractor: (options as any).extractor,
+        extractor,
       }) as Promise<T>;
     } else {
       return this._request<T>({
@@ -1122,22 +1130,45 @@ class FetchEnh {
    * Sets the configuration dynamically for the FetchHelper instance.
    */
   setConfig(config: FetchEnhConfig): void {
-    const allowedKeys: (keyof FetchEnhConfig)[] = [
-      'baseURL',
-      'defaultHeaders',
-      'defaultTimeout',
-      'defaultRetries', 'queryStyle',
-    ];
-    for (const key of allowedKeys) {
-      if (key in config) {
-        // @ts-ignore
-        if (key === 'baseURL') {
-          const v = (config as any)[key];
-          (this as any)[key] = typeof v === 'string' ? (v.endsWith('/') ? v.slice(0, -1) : v) : v;
-        } else {
-          (this as any)[key] = (config as any)[key];
-        }
+    const knownKeys = new Set<string>([
+      'baseURL', 'defaultHeaders', 'defaultTimeout', 'defaultRetries',
+      'queryStyle', 'dedupe', 'dedupeKey', 'onRetry', 'onComplete',
+    ]);
+    for (const key of Object.keys(config)) {
+      if (!knownKeys.has(key)) {
+        console.warn(`[FetchEnh] setConfig: unknown key "${key}" will be ignored.`);
       }
+    }
+    if ('baseURL' in config && config.baseURL !== undefined) {
+      const v = config.baseURL;
+      this.baseURL = v.endsWith('/') ? v.slice(0, -1) : v;
+    }
+    if ('defaultHeaders' in config && config.defaultHeaders !== undefined) {
+      this.defaultHeaders = config.defaultHeaders;
+    }
+    if ('defaultTimeout' in config && config.defaultTimeout !== undefined) {
+      this.defaultTimeout = config.defaultTimeout;
+    }
+    if ('defaultRetries' in config && config.defaultRetries !== undefined) {
+      this.defaultRetries = config.defaultRetries;
+    }
+    if ('queryStyle' in config && config.queryStyle) {
+      this._queryStyle = {
+        array: config.queryStyle.array ?? this._queryStyle.array,
+        object: config.queryStyle.object ?? this._queryStyle.object,
+      };
+    }
+    if ('dedupe' in config && typeof config.dedupe === 'boolean') {
+      this._dedupe = config.dedupe;
+    }
+    if ('dedupeKey' in config) {
+      this._dedupeKey = config.dedupeKey;
+    }
+    if ('onRetry' in config) {
+      this._onRetry = config.onRetry;
+    }
+    if ('onComplete' in config) {
+      this._onComplete = config.onComplete;
     }
   }
   setRetryBehavior(

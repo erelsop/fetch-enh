@@ -181,8 +181,6 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
   }
 
   async onAuthError(request: Request, response: Response, retry: (newRequest: Request) => Promise<Response>): Promise<Response | void> {
-    // Deduplicate concurrent 401-triggered refreshes behind the shared refreshingPromise,
-    // matching the pattern already used in BearerTokenAuth.
     if (!this.refreshingPromise) {
       this.refreshingPromise = this.fetchToken().finally(() => { this.refreshingPromise = null; });
     }

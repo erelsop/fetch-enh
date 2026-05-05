@@ -65,6 +65,8 @@ new FetchEnh({
 });
 ```
 
+`setConfig(config: FetchEnhConfig)` accepts the same options as the constructor and can be called at any time to update live settings. Unrecognised keys produce a `console.warn`.
+
 ## Methods (summary)
 
 - get/post/put/patch/delete({ endpoint, headers?, query?, body?, responseType?, options? })
@@ -124,6 +126,8 @@ await api.get({ endpoint: '/status', responseType: 'response' });
 Page-based:
 ```ts
 await api.get({ endpoint: '/users', page: 1, pageSize: 100, limit: 500, responseType: 'json' });
+// maxPages caps the number of page-fetches (default: 100 for both strategies)
+await api.get({ endpoint: '/users', page: 1, pageSize: 20, maxPages: 10, responseType: 'json' });
 ```
 
 Cursor-based:
@@ -135,6 +139,7 @@ await api.get({
   cursorParamName: 'cursor',
   getNextCursor: (resp) => resp.nextCursor,
   extractor: (resp) => resp.items,
+  maxPages: 50,   // optional; defaults to 100
 });
 // Or useLinkHeader: true to parse Link headers (server should expose ?cursor=...)
 ```

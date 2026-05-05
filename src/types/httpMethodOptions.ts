@@ -14,6 +14,7 @@ export interface PaginateOptions {
   page: number;
   pageSize: number;
   limit?: number;
+  maxPages?: number;
   method?: string;
   options?: RequestOptions;
   extractor?: (pageData: any) => any[];
@@ -29,6 +30,7 @@ export interface GetOptions {
   pageSize?: number;
   limit?: number;
   extractor?: (pageData: any) => any[];
+  maxPages?: number;
   // Cursor-based pagination
   cursor?: string | null;
   cursorParamName?: string; // default 'cursor'

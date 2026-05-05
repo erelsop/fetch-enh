@@ -266,3 +266,141 @@ test('raw without applyMiddleware skips the interceptor pipeline entirely', asyn
   expect(spy).not.toHaveBeenCalled();
   spy.mockRestore();
 });
+
+// ─── setConfig: missing keys now supported ──────────────────────────────────
+
+test('setConfig can update onRetry callback', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
+  const retryInfo: any[] = [];
+  api.setConfig({ onRetry: (info) => retryInfo.push(info) });
+  fetchMock
+    .mockResponseOnce('', { status: 500 })
+    .mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.get({ endpoint: '/retry-hook' });
+  expect(retryInfo.length).toBe(1);
+  expect(retryInfo[0].reason).toBe('status');
+});
+
+test('setConfig can update onComplete callback', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  let completedWith: any = null;
+  api.setConfig({ onComplete: (info) => { completedWith = info; } });
+  fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.get({ endpoint: '/complete-hook' });
+  expect(completedWith).not.toBeNull();
+  expect(completedWith.ok).toBe(true);
+  expect(completedWith.method).toBe('GET');
+});
+
+test('setConfig can enable dedupe after construction', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' }); // dedupe: false by default
+  api.setConfig({ dedupe: true });
+  fetchMock.mockImplementationOnce(async () => {
+    await new Promise(r => setTimeout(r, 30));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const p1 = api.get({ endpoint: '/dedupe-cfg' });
+  const p2 = api.get({ endpoint: '/dedupe-cfg' });
+  await Promise.all([p1, p2]);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test('setConfig can update dedupeKey factory', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test', dedupe: true });
+  // Install a custom dedupeKey that treats all POSTs to same endpoint as identical
+  api.setConfig({ dedupeKey: ({ method, url }) => `${method}:${url}` });
+  fetchMock.mockImplementationOnce(async () => {
+    await new Promise(r => setTimeout(r, 30));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const p1 = api.post({ endpoint: '/submit', body: { a: 1 } });
+  const p2 = api.post({ endpoint: '/submit', body: { a: 2 } });
+  const [r1, r2] = await Promise.all([p1, p2]);
+  expect(r1).toEqual({ ok: true });
+  expect(r2).toEqual({ ok: true });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test('setConfig can update queryStyle and it takes effect on subsequent requests', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' }); // default: brackets
+  api.setConfig({ queryStyle: { array: 'repeat', object: 'dot' } });
+  fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.get({ endpoint: '/qs', query: { a: [1, 2], filter: { status: 'active' } } });
+  const url = fetchMock.mock.calls[0][0] as string;
+  expect(url.includes('a=1') && url.includes('a=2')).toBe(true);  // repeat style
+  expect(url).toContain('filter.status=active');                   // dot style
+});
+
+test('setConfig warns on unknown keys', () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  (api as any).setConfig({ unknownKey: 'oops', anotherBadKey: 42 });
+  expect(warnSpy).toHaveBeenCalledTimes(2);
+  expect(warnSpy.mock.calls[0][0]).toContain('unknownKey');
+  expect(warnSpy.mock.calls[1][0]).toContain('anotherBadKey');
+  warnSpy.mockRestore();
+});
+
+// ─── Pagination: maxPages option ─────────────────────────────────────────────
+
+test('page-based pagination respects maxPages option', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // Always return 5 items per page (> 0 so natural termination never fires)
+  fetchMock.mockResponse(JSON.stringify([1, 2, 3, 4, 5]), { status: 200, headers: { 'content-type': 'application/json' } });
+  const results = await api.get<number[]>({
+    endpoint: '/paged',
+    page: 1,
+    pageSize: 5,
+    maxPages: 3,
+    responseType: 'json',
+  });
+  // 3 pages × 5 items = 15 items; fetch should be called exactly 3 times
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect((results as any[]).length).toBe(15);
+});
+
+test('cursor-based pagination respects maxPages option', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // Each page returns items and a next cursor — would loop forever without maxPages
+  fetchMock.mockResponse(
+    JSON.stringify({ items: [1, 2], next: 'next-cursor' }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+  const results = await api.get<number[]>({
+    endpoint: '/cursor-paged',
+    responseType: 'json',
+    cursor: null,
+    getNextCursor: (resp: any) => resp.next,
+    extractor: (resp: any) => resp.items,
+    maxPages: 4,
+  } as any);
+  // 4 pages × 2 items = 8 items; fetch called exactly 4 times
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  expect((results as any[]).length).toBe(8);
+});
+
+test('default page-based pagination cap is 100', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  fetchMock.mockResponse(JSON.stringify([1]), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.get({ endpoint: '/paged-default', page: 1, pageSize: 1, responseType: 'json' });
+  // Each page has exactly 1 item = pageSize, so natural termination never fires.
+  // The maxPages default of 100 should terminate it after 100 fetches.
+  expect(fetchMock).toHaveBeenCalledTimes(100);
+});
+
+test('default cursor-based pagination cap is 100 (not 200)', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  fetchMock.mockResponse(
+    JSON.stringify({ items: [1], next: 'always-next' }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+  await api.get({
+    endpoint: '/cursor-default',
+    responseType: 'json',
+    cursor: null,
+    getNextCursor: (resp: any) => resp.next,
+    extractor: (resp: any) => resp.items,
+  } as any);
+  // Previously capped at 201; new default is 100.
+  expect(fetchMock).toHaveBeenCalledTimes(100);
+});
