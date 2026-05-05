@@ -492,8 +492,23 @@ class FetchEnh {
                 return fetch(newReq.url, newInit);
               });
               if (maybeRes instanceof Response) {
-                // Re-run response interceptors on the new response
-                return this._applyResponseInterceptors(maybeRes);
+                // Apply response interceptors, then fully parse the body through the
+                // correct responseType path. Previously this short-circuited to
+                // _applyResponseInterceptors and returned a raw Response, silently
+                // violating the generic type contract (e.g. get<User>() returning Response).
+                const retryIntercepted = await this._applyResponseInterceptors(maybeRes);
+                const retryMethod = request.method.toUpperCase();
+                if (!retryIntercepted.ok) {
+                  let retryErrorData;
+                  try { retryErrorData = await retryIntercepted.json(); } catch { retryErrorData = { message: 'Unable to parse error data.' }; }
+                  if (this._onComplete) this._onComplete({ method: retryMethod, url: request.url, status: retryIntercepted.status, ok: false, attempts: attempt, elapsedMs: Date.now() - startTime });
+                  throw new FetchError(retryIntercepted, retryErrorData, {
+                    method: retryMethod, url: request.url, attempts: attempt, elapsedMs: Date.now() - startTime,
+                    requestId: retryIntercepted.headers.get('x-request-id') || retryIntercepted.headers.get('x-requestid') || undefined,
+                  });
+                }
+                if (this._onComplete) this._onComplete({ method: retryMethod, url: request.url, status: retryIntercepted.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
+                return this._parseBody(retryIntercepted, responseType);
               }
               if (maybeRes === false) {
                 throw new Error('Auth strategy halted after auth error.');
@@ -522,61 +537,10 @@ class FetchEnh {
         }
         throw fetchErr;
       }
-      switch (responseType) {
-        case 'json': {
-          const val = await interceptedResponse.json();
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return val;
-        }
-        case 'text': {
-          const val = await interceptedResponse.text();
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return val;
-        }
-        case 'blob': {
-          const val = await interceptedResponse.blob();
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return val;
-        }
-        case 'arrayBuffer': {
-          const val = await interceptedResponse.arrayBuffer();
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return val;
-        }
-        case 'formData': {
-          const val = await interceptedResponse.formData();
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return val;
-        }
-        case 'response':
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: interceptedResponse.ok, attempts: attempt, elapsedMs: Date.now() - startTime });
-          return interceptedResponse;
-        case 'auto': {
-          const contentType = interceptedResponse.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const val = await interceptedResponse.json();
-            if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-            return val;
-          }
-          if (contentType.startsWith('text/')) {
-            const val = await interceptedResponse.text();
-            if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-            return val;
-          }
-          if (contentType.includes('application/octet-stream')) {
-            const val = await interceptedResponse.arrayBuffer();
-            if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-            return val;
-          }
-          if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
-          // Fallback: return Response for caller to handle
-          return interceptedResponse;
-        }
-        default:
-          throw new UnsupportedResponseTypeError(
-            responseType
-          );
-      }
+      // Parse the successful response body, then fire the completion hook.
+      const result = await this._parseBody(interceptedResponse, responseType);
+      if (this._onComplete) this._onComplete({ method, url: request.url, status: interceptedResponse.status, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
+      return result;
     } catch (error: any) {
       if (error.name === 'AbortError') {
         if (timedOut) {
@@ -664,8 +628,39 @@ class FetchEnh {
     if (body instanceof ArrayBuffer) return true;
     if (body instanceof Blob) return true;
     if (body instanceof FormData) return true;
-    if (typeof body === 'object') return true; // JSON object gets stringified
+    // ReadableStream bodies cannot be replayed once consumed; guard before the
+    // generic object check below which would otherwise return true for them.
+    if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) return false;
+    if (typeof body === 'object') return true; // plain JSON object — gets JSON.stringify'd
     return false;
+  }
+
+  /**
+   * Parses a successful Response body according to the requested responseType.
+   * Extracted to eliminate the duplicated switch that previously appeared in both
+   * the happy path and the auth-retry path of _fetchAndParse.
+   */
+  private async _parseBody(
+    response: Response,
+    responseType: string
+  ): Promise<JSON | string | Blob | ArrayBuffer | FormData | Response> {
+    switch (responseType) {
+      case 'json': return response.json();
+      case 'text': return response.text();
+      case 'blob': return response.blob();
+      case 'arrayBuffer': return response.arrayBuffer();
+      case 'formData': return response.formData();
+      case 'response': return response;
+      case 'auto': {
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('application/json')) return response.json();
+        if (ct.startsWith('text/')) return response.text();
+        if (ct.includes('application/octet-stream')) return response.arrayBuffer();
+        return response; // fallback: caller handles opaque response
+      }
+      default:
+        throw new UnsupportedResponseTypeError(responseType);
+    }
   }
 
   /**

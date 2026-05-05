@@ -81,30 +81,52 @@ describe('Authentication Strategies', () => {
     });
 
     test('refreshes token on 401 and retries', async () => {
+        const store = new MemoryTokenStore('expired-token');
+        let refreshCalled = false;
+      
+        const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      
+        api.useAuthStrategy(new BearerTokenAuth(store, async () => {
+          refreshCalled = true;
+          return 'fresh-token';
+        }));
+      
+        // First call returns 401, refresh happens, then retry succeeds
+        fetchMock
+          .mockResponseOnce('Unauthorized', { status: 401 })
+          .mockResponseOnce(JSON.stringify({ data: 'success' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          });
+      
+        const result = await api.get({ endpoint: '/protected' });
+      
+        expect(refreshCalled).toBe(true);
+        expect(store.getToken()).toBe('fresh-token');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        // Auth retry must return the parsed body, not a raw Response object.
+        expect(result).toEqual({ data: 'success' });
+        expect(result).not.toBeInstanceOf(Response);
+      });
+
+    test('auth retry returns parsed body, not raw Response (type-contract regression)', async () => {
       const store = new MemoryTokenStore('expired-token');
-      let refreshCalled = false;
-      
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
-      
-      api.useAuthStrategy(new BearerTokenAuth(store, async () => {
-        refreshCalled = true;
-        return 'fresh-token';
-      }));
-      
-      // First call returns 401, refresh happens, then retry succeeds
+
+      api.useAuthStrategy(new BearerTokenAuth(store, async () => 'fresh-token'));
+
       fetchMock
         .mockResponseOnce('Unauthorized', { status: 401 })
-        .mockResponseOnce(JSON.stringify({ data: 'success' }), {
+        .mockResponseOnce(JSON.stringify({ id: 1, name: 'Alice' }), {
           status: 200,
-          headers: { 'content-type': 'application/json' }
+          headers: { 'content-type': 'application/json' },
         });
-      
-      const result = await api.get({ endpoint: '/protected' });
-      
-      expect(refreshCalled).toBe(true);
-      expect(store.getToken()).toBe('fresh-token');
-      // Result might be a Response object, check if it was successful
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      const result = await api.get<{ id: number; name: string }>({ endpoint: '/me', responseType: 'json' });
+
+      // TypeScript generic must be honoured — result is the parsed object, never a raw Response.
+      expect(result).not.toBeInstanceOf(Response);
+      expect(result).toEqual({ id: 1, name: 'Alice' });
     });
 
     test('supports async token store in BearerTokenAuth', async () => {

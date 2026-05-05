@@ -181,8 +181,12 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
   }
 
   async onAuthError(request: Request, response: Response, retry: (newRequest: Request) => Promise<Response>): Promise<Response | void> {
-    // Attempt refresh once on 401/403
-    const token = await this.fetchToken();
+    // Deduplicate concurrent 401-triggered refreshes behind the shared refreshingPromise,
+    // matching the pattern already used in BearerTokenAuth.
+    if (!this.refreshingPromise) {
+      this.refreshingPromise = this.fetchToken().finally(() => { this.refreshingPromise = null; });
+    }
+    const token = await this.refreshingPromise;
     if (!token) return;
     const headers = new Headers(request.headers);
     headers.set('Authorization', `Bearer ${token}`);

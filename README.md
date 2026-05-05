@@ -11,6 +11,8 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 - Response parsing (auto or explicit types)
 - Pagination (page/pageSize and cursor/Link-header)
 - TypeScript-first API, works in browsers and Node.js
+- Zero runtime dependencies
+- Dual CJS/ESM build — tree-shakeable by modern bundlers (Vite, esbuild, Rollup)
 
 ## Installation
 
@@ -18,8 +20,18 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 git clone https://github.com/erelsop/FetchEnh.git
 cd FetchEnh
 npm install
-npm run build
+npm run build        # emits both CJS (dist/) and ESM (dist/esm/)
 ```
+
+The package ships a dual build:
+
+| Condition | Output |
+|-----------|--------|
+| `require()` / CJS bundlers | `dist/index.js` |
+| `import` / ESM bundlers | `dist/esm/index.js` |
+| TypeScript types | `dist/index.d.ts` |
+
+Bundlers that respect the `exports` map in `package.json` (Vite, esbuild, Rollup, webpack 5+) will automatically select the correct entry point.
 
 ## Quick Start
 
