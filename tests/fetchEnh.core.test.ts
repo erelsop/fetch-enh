@@ -217,3 +217,52 @@ test('query style repeat/comma and dot object notation', async () => {
   const url2 = fetchMock.mock.calls[0][0] as string;
   expect(url2).toMatch(/a=1%2C2|a=1,2/);
 });
+
+test('request deduping does NOT coalesce concurrent POSTs by default', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test', dedupe: true });
+  fetchMock.mockImplementation(async () => {
+    await new Promise(r => setTimeout(r, 30));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const p1 = api.post({ endpoint: '/submit', body: { a: 1 } });
+  const p2 = api.post({ endpoint: '/submit', body: { a: 1 } });
+  await Promise.all([p1, p2]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  fetchMock.resetMocks();
+});
+
+test('request deduping DOES coalesce concurrent POSTs when explicit dedupeKey is provided', async () => {
+  const api = new FetchEnh({
+    baseURL: 'https://api.test',
+    dedupe: true,
+    dedupeKey: ({ method, url }) => `${method} ${url}`,
+  });
+  fetchMock.mockImplementationOnce(async () => {
+    await new Promise(r => setTimeout(r, 30));
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const p1 = api.post({ endpoint: '/submit', body: { a: 1 } });
+  const p2 = api.post({ endpoint: '/submit', body: { a: 1 } });
+  const [r1, r2] = await Promise.all([p1, p2]);
+  expect(r1).toEqual({ ok: true });
+  expect(r2).toEqual({ ok: true });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test('raw with applyMiddleware:true invokes request interceptor pipeline', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  const spy = jest.spyOn(api as any, '_applyRequestInterceptors');
+  fetchMock.mockResponseOnce('', { status: 200 });
+  await api.raw({ endpoint: '/test', applyMiddleware: true });
+  expect(spy).toHaveBeenCalledTimes(1);
+  spy.mockRestore();
+});
+
+test('raw without applyMiddleware skips the interceptor pipeline entirely', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  const spy = jest.spyOn(api as any, '_applyRequestInterceptors');
+  fetchMock.mockResponseOnce('', { status: 200 });
+  await api.raw({ endpoint: '/test' });
+  expect(spy).not.toHaveBeenCalled();
+  spy.mockRestore();
+});

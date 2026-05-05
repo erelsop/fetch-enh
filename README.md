@@ -69,7 +69,9 @@ new FetchEnh({
 
 - get/post/put/patch/delete({ endpoint, headers?, query?, body?, responseType?, options? })
 - head({ endpoint, headers?, query? }) → Promise<Response>
-- raw({ endpoint, method?, headers?, body?, query? }) → Promise<Response>
+- raw({ endpoint, method?, headers?, body?, query?, applyMiddleware? }) → Promise<Response>
+  - By default, `raw()` calls `fetch()` directly — no interceptors, no auth, no timeout, no retries.
+  - Pass `applyMiddleware: true` to apply request interceptors, auth strategies, and response interceptors while still skipping timeout and retry scaffolding.
 
 Response types: 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'response' | 'auto' (default)
 
@@ -169,7 +171,7 @@ await api.get({ endpoint: '/slow', options: { timeout: 5000, signal: c.signal } 
 
 - onRetry(info): called before retry (status/network)
 - onComplete(info): called after completion (success or error)
-- dedupe: coalesce concurrent identical requests (configurable key)
+- dedupe: coalesce concurrent identical **GET / HEAD / OPTIONS** requests into a single in-flight promise. Mutation methods (POST, DELETE, PATCH, PUT) are **not** deduplicated by default — each call produces its own side-effect. To opt mutation methods into deduplication, supply an explicit `dedupeKey` factory at construction time.
 
 ## Environment
 

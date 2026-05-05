@@ -78,4 +78,6 @@ export interface RawOptions {
   headers?: Record<string, string>;
   query?: Record<string, any>;
   bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  /** When `true`, request interceptors, auth strategies, and response interceptors are applied before/after the fetch. Defaults to `false`. */
+  applyMiddleware?: boolean;
 }

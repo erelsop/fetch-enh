@@ -435,27 +435,7 @@ class FetchEnh {
           }
           await sleep(delay);
 
-          let nextRequest = request;
-          const needIdem = this._retryConfig.idempotencyKeyFactory && ['POST', 'DELETE'].includes(method);
-          if (retryCtx?.bodyFactory || needIdem) {
-            const headersObj = new Headers(request.headers);
-            if (needIdem && !headersObj.has('Idempotency-Key')) {
-              headersObj.set('Idempotency-Key', this._retryConfig.idempotencyKeyFactory!());
-            }
-            if (retryCtx?.bodyFactory) {
-              const newBody = retryCtx.bodyFactory();
-              const combined: Record<string, string> = {};
-              headersObj.forEach((v, k) => { combined[k] = v; });
-              this._setContentTypeHeader(newBody as any, combined);
-              let adjusted: any = newBody as any;
-              if (typeof newBody === 'object' && !(newBody instanceof FormData) && !(newBody instanceof Blob) && !(newBody instanceof ArrayBuffer) && !(newBody instanceof URLSearchParams)) {
-                adjusted = JSON.stringify(newBody);
-              }
-              nextRequest = new Request(request.url, { method: request.method, headers: combined as any, body: adjusted });
-            } else {
-              nextRequest = new Request(request, { headers: headersObj });
-            }
-          }
+          const nextRequest = this._buildRetryRequest(request, method, retryCtx);
 
           return this._fetchAndParse(
             nextRequest,
@@ -573,27 +553,7 @@ class FetchEnh {
         }
         await sleep(delay);
 
-        let nextRequest = request;
-        const needIdem = this._retryConfig.idempotencyKeyFactory && ['POST', 'DELETE'].includes(method);
-        if (retryCtx?.bodyFactory || needIdem) {
-          const headersObj = new Headers(request.headers);
-          if (needIdem && !headersObj.has('Idempotency-Key')) {
-            headersObj.set('Idempotency-Key', this._retryConfig.idempotencyKeyFactory!());
-          }
-          if (retryCtx?.bodyFactory) {
-            const newBody = retryCtx.bodyFactory();
-            const combined: Record<string, string> = {};
-            headersObj.forEach((v, k) => { combined[k] = v; });
-            this._setContentTypeHeader(newBody as any, combined);
-            let adjusted: any = newBody as any;
-            if (typeof newBody === 'object' && !(newBody instanceof FormData) && !(newBody instanceof Blob) && !(newBody instanceof ArrayBuffer) && !(newBody instanceof URLSearchParams)) {
-              adjusted = JSON.stringify(newBody);
-            }
-            nextRequest = new Request(request.url, { method: request.method, headers: combined as any, body: adjusted });
-          } else {
-            nextRequest = new Request(request, { headers: headersObj });
-          }
-        }
+        const nextRequest = this._buildRetryRequest(request, method, retryCtx);
 
         return this._fetchAndParse(
           nextRequest,
@@ -633,6 +593,40 @@ class FetchEnh {
     if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) return false;
     if (typeof body === 'object') return true; // plain JSON object — gets JSON.stringify'd
     return false;
+  }
+
+  /**
+   * Reconstructs the `Request` for a retry attempt. Adds an `Idempotency-Key` header
+   * when an `idempotencyKeyFactory` is configured, and replays the body through
+   * `bodyFactory` when provided. Returns the original request unchanged when neither
+   * action is needed, keeping the common case allocation-free.
+   *
+   * Extracted to eliminate the identical retry-rebuild block that previously appeared
+   * in both the non-OK response path and the network-error catch path of `_fetchAndParse`.
+   */
+  private _buildRetryRequest(
+    request: Request,
+    method: string,
+    retryCtx?: { method: string; bodyFactory?: () => BodyType; bodyReplayable?: boolean }
+  ): Request {
+    const needIdem = this._retryConfig.idempotencyKeyFactory && ['POST', 'DELETE'].includes(method);
+    if (!retryCtx?.bodyFactory && !needIdem) return request;
+    const headersObj = new Headers(request.headers);
+    if (needIdem && !headersObj.has('Idempotency-Key')) {
+      headersObj.set('Idempotency-Key', this._retryConfig.idempotencyKeyFactory!());
+    }
+    if (retryCtx?.bodyFactory) {
+      const newBody = retryCtx.bodyFactory();
+      const combined: Record<string, string> = {};
+      headersObj.forEach((v, k) => { combined[k] = v; });
+      this._setContentTypeHeader(newBody as any, combined);
+      let adjusted: any = newBody as any;
+      if (typeof newBody === 'object' && !(newBody instanceof FormData) && !(newBody instanceof Blob) && !(newBody instanceof ArrayBuffer) && !(newBody instanceof URLSearchParams)) {
+        adjusted = JSON.stringify(newBody);
+      }
+      return new Request(request.url, { method: request.method, headers: combined as any, body: adjusted });
+    }
+    return new Request(request, { headers: headersObj });
   }
 
   /**
@@ -695,7 +689,14 @@ class FetchEnh {
     const dedupeKey = this._dedupeKey
       ? this._dedupeKey({ method: methodUpper, url: request.url, body: bodyKey })
       : `${methodUpper} ${request.url} ${bodyKey ?? ''}`;
-    if (this._dedupe) {
+    // Only deduplicate safe (read-only) methods unless the caller has explicitly
+    // provided a custom dedupeKey factory. Coalescing concurrent POST / DELETE /
+    // PATCH / PUT calls is a subtle mutation bug: two callers expect two side-effects
+    // but receive only one. Users who genuinely want mutation-deduplication must opt
+    // in by passing dedupeKey at construction time.
+    const SAFE_DEDUPE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+    const shouldDedupe = this._dedupe && (SAFE_DEDUPE_METHODS.has(methodUpper) || !!this._dedupeKey);
+    if (shouldDedupe) {
       const existing = this._inflight.get(dedupeKey);
       if (existing) return existing as Promise<T>;
     }
@@ -717,7 +718,7 @@ class FetchEnh {
         bodyReplayable,
       }
     ) as Promise<T>;
-    if (this._dedupe) {
+    if (shouldDedupe) {
       this._inflight.set(dedupeKey, promise as any);
       promise.finally(() => {
         this._inflight.delete(dedupeKey);
@@ -1073,8 +1074,21 @@ class FetchEnh {
   }
 
   /**
-   * Makes a raw fetch request without processing the response.
-   * Useful when more custom handling is required on the response.
+   * Performs a raw fetch, bypassing all middleware by default.
+   *
+   * @remarks
+   * **Middleware bypass warning:** By default `raw()` calls the native `fetch()` directly.
+   * No request interceptors, response interceptors, auth strategies, timeouts, or retries
+   * are applied. Code that relies on `useAuthStrategy()` or `addRequestInterceptor()` will
+   * see those additions silently ignored on calls routed through `raw()`.
+   *
+   * Pass `{ applyMiddleware: true }` to opt back in to request interceptors, auth
+   * strategies, and response interceptors — without the full timeout/retry scaffolding
+   * of a normal `_request` call. This is useful when you need auth headers applied to a
+   * one-shot request but do not want automatic retries.
+   *
+   * @param options - Raw request options.
+   * @returns A native `Response` promise.
    */
   async raw(options: RawOptions): Promise<Response> {
     const {
@@ -1083,15 +1097,24 @@ class FetchEnh {
       body,
       headers = {},
       query = {},
+      applyMiddleware = false,
     } = options;
 
-    const request = this._buildRequest(
+    let request = this._buildRequest(
       endpoint,
       method,
       body,
       headers,
       query
     );
+
+    if (applyMiddleware) {
+      request = await this._applyRequestInterceptors(request);
+      request = await this._applyAuthOnRequest(request);
+      const response = await fetch(request);
+      return this._applyResponseInterceptors(response);
+    }
+
     return fetch(request);
   }
 
