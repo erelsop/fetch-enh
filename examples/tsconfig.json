@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "noEmit": true,
+    "baseUrl": "..",
+    "paths": {
+      "fetch-enh": ["src/index.ts"]
+    }
+  },
+  "include": ["./**/*.ts"]
+}

@@ -129,6 +129,17 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
   private expiresAt: number | null = null;
 
   constructor(params: { tokenURL: string; clientId: string; clientSecret: string; scope?: string | string[]; tokenStore: TokenStore; priority?: number; fetchFn?: typeof fetch }) {
+    // Detect a genuine browser context: `window` is defined but there is no Node.js process.
+    // This intentionally does NOT fire in jsdom / test environments (Node.js + window).
+    const inBrowser = typeof window !== 'undefined' &&
+      (typeof process === 'undefined' || !(process as any).versions?.node);
+    if (inBrowser) {
+      throw new Error(
+        '[FetchEnh] OAuth2ClientCredentialsAuth must not be instantiated in a browser context. ' +
+        'The client_secret would be exposed to end users via the Network tab. ' +
+        'Use OAuth2PKCEAuth for browser-based OAuth 2.0 instead.'
+      );
+    }
     this.tokenURL = params.tokenURL;
     this.clientId = params.clientId;
     this.clientSecret = params.clientSecret;

@@ -3,9 +3,12 @@ import {
   UnsupportedResponseTypeError,
   TimeoutError,
   RetryError,
+  InterceptorAbortError,
+  AuthAbortError,
 } from './errors/fetchErrors';
 import type { FetchEnhConfig } from './types/config';
 import type { RequestParameters, BodyType } from './types/requestParameters';
+import type { RequestOptions } from './types/requestOptions';
 import type {
   GetOptions,
   PostOptions,
@@ -297,11 +300,10 @@ class FetchEnh {
       try {
         const result = await interceptor.handler(downstream, async () => { /* no-op for back-compat */ });
         if (result === false) {
-          throw new Error('Interceptor halted request.');
+          throw new InterceptorAbortError();
         }
         return result instanceof Request ? result : downstream;
       } catch (error) {
-        console.error('Error in request interceptor:', error);
         throw error;
       }
     };
@@ -322,11 +324,10 @@ class FetchEnh {
       try {
         const result = await interceptor.handler(downstream, async () => { /* no-op for back-compat */ });
         if (result === false) {
-          throw new Error('Interceptor halted response.');
+          throw new InterceptorAbortError('Response interceptor halted.');
         }
         return result instanceof Response ? result : downstream;
       } catch (error) {
-        console.error('Error in response interceptor:', error);
         throw error;
       }
     };
@@ -345,7 +346,7 @@ class FetchEnh {
     externalSignal?: AbortSignal,
     attempt: number = 1,
     startTime: number = Date.now(),
-    retryCtx?: { method: string; bodyFactory?: () => BodyType; bodyReplayable?: boolean }
+    retryCtx?: { method: string; bodyFactory?: () => BodyType; bodyReplayable?: boolean; rawBody?: BodyInit | null }
   ): Promise<
     JSON | string | Blob | ArrayBuffer | FormData | Response
   > {
@@ -401,10 +402,24 @@ class FetchEnh {
     try {
       const method = request.method.toUpperCase();
       const urlForFetch = request.url;
+      // Resolve fetch body without touching request.body (a consumed ReadableStream in native fetch).
+      // bodyFactory produces a fresh body on every attempt; rawBody is the pre-serialised value
+      // stored by _request so it can be safely replayed across retries.
+      const fetchBody: BodyInit | null | undefined = retryCtx?.bodyFactory
+        ? (() => {
+            const f = retryCtx.bodyFactory!();
+            return (typeof f === 'object' &&
+              !(f instanceof FormData) && !(f instanceof Blob) &&
+              !(f instanceof ArrayBuffer) && !(f instanceof URLSearchParams))
+              ? JSON.stringify(f) : f as BodyInit;
+          })()
+        : retryCtx?.rawBody !== undefined
+          ? retryCtx.rawBody
+          : ((request as any)._bodyInit ?? (request as any).body) as BodyInit | null | undefined;
       const initForFetch: RequestInit = {
         method: request.method,
         headers: request.headers as any,
-        body: (request as any)._bodyInit ?? (request as any).body,
+        body: fetchBody,
         signal: controller.signal,
       };
       const response = await fetch(urlForFetch, initForFetch);
@@ -462,11 +477,22 @@ class FetchEnh {
           for (const strategy of this._authStrategies) {
             if (strategy.onAuthError) {
               const maybeRes = await strategy.onAuthError(request, interceptedResponse, async (newReq: Request) => {
-                // retry the original fetch once after strategy action
+                // Use retryCtx body to avoid ReadableStream reuse after the initial fetch consumed it
+                const authBody: BodyInit | null | undefined = retryCtx?.bodyFactory
+                  ? (() => {
+                      const f = retryCtx.bodyFactory!();
+                      return (typeof f === 'object' &&
+                        !(f instanceof FormData) && !(f instanceof Blob) &&
+                        !(f instanceof ArrayBuffer) && !(f instanceof URLSearchParams))
+                        ? JSON.stringify(f) : f as BodyInit;
+                    })()
+                  : retryCtx?.rawBody !== undefined
+                    ? retryCtx.rawBody
+                    : ((newReq as any)._bodyInit ?? (newReq as any).body) as BodyInit | null | undefined;
                 const newInit: RequestInit = {
                   method: newReq.method,
                   headers: newReq.headers as any,
-                  body: (newReq as any)._bodyInit ?? (newReq as any).body,
+                  body: authBody,
                   signal: controller.signal,
                 };
                 return fetch(newReq.url, newInit);
@@ -530,7 +556,7 @@ class FetchEnh {
       }
 
       // If this is a known library error, rethrow as-is (do not treat as network)
-      if (error instanceof UnsupportedResponseTypeError || error instanceof FetchError || error instanceof TimeoutError || error instanceof RetryError) {
+      if (error instanceof UnsupportedResponseTypeError || error instanceof FetchError || error instanceof TimeoutError || error instanceof RetryError || error instanceof InterceptorAbortError || error instanceof AuthAbortError) {
         throw error;
       }
 
@@ -607,26 +633,17 @@ class FetchEnh {
   private _buildRetryRequest(
     request: Request,
     method: string,
-    retryCtx?: { method: string; bodyFactory?: () => BodyType; bodyReplayable?: boolean }
+    retryCtx?: { method: string; bodyFactory?: () => BodyType; bodyReplayable?: boolean; rawBody?: BodyInit | null }
   ): Request {
+    // Body is now passed directly to fetch() via retryCtx.rawBody / bodyFactory in _fetchAndParse;
+    // this method only needs to mutate headers (e.g. add Idempotency-Key).
     const needIdem = this._retryConfig.idempotencyKeyFactory && ['POST', 'DELETE'].includes(method);
-    if (!retryCtx?.bodyFactory && !needIdem) return request;
+    if (!needIdem) return request;
     const headersObj = new Headers(request.headers);
-    if (needIdem && !headersObj.has('Idempotency-Key')) {
+    if (!headersObj.has('Idempotency-Key')) {
       headersObj.set('Idempotency-Key', this._retryConfig.idempotencyKeyFactory!());
     }
-    if (retryCtx?.bodyFactory) {
-      const newBody = retryCtx.bodyFactory();
-      const combined: Record<string, string> = {};
-      headersObj.forEach((v, k) => { combined[k] = v; });
-      this._setContentTypeHeader(newBody as any, combined);
-      let adjusted: any = newBody as any;
-      if (typeof newBody === 'object' && !(newBody instanceof FormData) && !(newBody instanceof Blob) && !(newBody instanceof ArrayBuffer) && !(newBody instanceof URLSearchParams)) {
-        adjusted = JSON.stringify(newBody);
-      }
-      return new Request(request.url, { method: request.method, headers: combined as any, body: adjusted });
-    }
-    return new Request(request, { headers: headersObj });
+    return new Request(request.url, { method: request.method, headers: headersObj });
   }
 
   /**
@@ -704,6 +721,16 @@ class FetchEnh {
     const finalResponseType = responseType;
     const bodyReplayable = this._isReplayableBody(body);
 
+    // Pre-serialise the body (mirrors _buildRequest's logic) so it can be replayed on retry
+    // without consuming the ReadableStream that native fetch creates internally for Request.body.
+    const rawBody: BodyInit | null | undefined = body != null
+      ? (typeof body === 'object' &&
+          !(body instanceof FormData) && !(body instanceof Blob) &&
+          !(body instanceof ArrayBuffer) && !(body instanceof URLSearchParams))
+        ? JSON.stringify(body)
+        : body as BodyInit
+      : undefined;
+
     const promise = this._fetchAndParse(
       request,
       finalResponseType,
@@ -716,6 +743,7 @@ class FetchEnh {
         method: methodUpper,
         bodyFactory,
         bodyReplayable,
+        rawBody,
       }
     ) as Promise<T>;
     if (shouldDedupe) {
@@ -836,6 +864,8 @@ class FetchEnh {
     getNextCursor?: (response: any, headers: Headers) => string | null;
     useLinkHeader?: boolean;
     extractor?: (response: any) => any[];
+    /** Per-call timeout / retry / signal overrides passed through from get(). */
+    options?: RequestOptions;
   }): Promise<T[]> {
     const {
       endpoint,
@@ -849,6 +879,7 @@ class FetchEnh {
       getNextCursor,
       useLinkHeader,
       extractor,
+      options: perCallOptions,
     } = params;
 
     let cursor = initialCursor;
@@ -870,12 +901,25 @@ class FetchEnh {
           headers,
           query: q,
           responseType: 'response',
-          options: { timeout: this.defaultTimeout, retries: this.defaultRetries },
+          options: perCallOptions ?? { timeout: this.defaultTimeout, retries: this.defaultRetries },
         } as any);
         // Parse body as JSON and extract items
         const data = await res.clone().json().catch(() => []);
         pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
         nextCursor = getNextCursor ? getNextCursor(data, res.headers) : this._parseLinkHeaderForNextCursor(res.headers, cursorParamName);
+      } else if (getNextCursor) {
+        // getNextCursor needs access to response headers — fetch as Response
+        const res = await this._request<Response>({
+          endpoint,
+          method: 'GET',
+          headers,
+          query: q,
+          responseType: 'response',
+          options: perCallOptions ?? { timeout: this.defaultTimeout, retries: this.defaultRetries },
+        } as any);
+        const data = await res.clone().json().catch(() => []);
+        pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
+        nextCursor = getNextCursor(data, res.headers);
       } else {
         const resp: any = await this._request({
           endpoint,
@@ -883,11 +927,10 @@ class FetchEnh {
           headers,
           query: q,
           responseType,
-          options: { timeout: this.defaultTimeout, retries: this.defaultRetries },
+          options: perCallOptions ?? { timeout: this.defaultTimeout, retries: this.defaultRetries },
         });
         if (responseType === 'json') {
           pageItems = Array.isArray(resp) ? resp : (extractor ? extractor(resp) : []);
-          if (getNextCursor) nextCursor = getNextCursor(resp, new Headers());
         }
       }
 
@@ -961,6 +1004,7 @@ class FetchEnh {
         getNextCursor: options.getNextCursor,
         useLinkHeader: options.useLinkHeader,
         extractor,
+        options: perCallOptions,
       }) as Promise<T>;
     } else {
       return this._request<T>({
@@ -985,6 +1029,8 @@ class FetchEnh {
       headers = {},
       responseType = 'json',
       options: perCallOptions,
+      query = {},
+      bodyFactory,
     } = options;
 
     return this._request({
@@ -992,9 +1038,10 @@ class FetchEnh {
       method: 'POST',
       body,
       headers,
-      query: {},
+      query,
       responseType,
       options: perCallOptions,
+      bodyFactory,
     });
   }
 
@@ -1013,6 +1060,8 @@ class FetchEnh {
       headers = {},
       responseType = 'json',
       options: perCallOptions,
+      query = {},
+      bodyFactory,
     } = options;
 
     return this._request({
@@ -1020,9 +1069,10 @@ class FetchEnh {
       method: 'PUT',
       body,
       headers,
-      query: {},
+      query,
       responseType,
       options: perCallOptions,
+      bodyFactory,
     });
   }
 
@@ -1041,6 +1091,8 @@ class FetchEnh {
       headers = {},
       responseType = 'json',
       options: perCallOptions,
+      query = {},
+      bodyFactory,
     } = options;
 
     return this._request({
@@ -1048,9 +1100,10 @@ class FetchEnh {
       method: 'PATCH',
       body,
       headers,
-      query: {},
+      query,
       responseType,
       options: perCallOptions,
+      bodyFactory,
     });
   }
 
@@ -1068,14 +1121,16 @@ class FetchEnh {
       headers = {},
       responseType = 'json',
       options: perCallOptions,
+      body,
+      query = {},
     } = options;
 
     return this._request({
       endpoint,
       method: 'DELETE',
-      body: undefined,
+      body,
       headers,
-      query: {},
+      query,
       responseType,
       options: perCallOptions,
     });
@@ -1181,6 +1236,30 @@ class FetchEnh {
     if (config) this._retryConfig = { ...this._retryConfig, ...config };
   }
 
+  /**
+   * Replaces only the retry classifier, leaving the backoff strategy and config unchanged.
+   * Pass `null` to revert to the built-in default (retry 5xx + 429).
+   */
+  setRetryClassifier(classifier: RetryClassifier | null): void {
+    this._retryClassifier = classifier;
+  }
+
+  /**
+   * Replaces only the backoff strategy, leaving the classifier and config unchanged.
+   * Pass `null` to revert to the built-in exponential-backoff-with-jitter default.
+   */
+  setBackoffStrategy(backoff: BackoffStrategy | null): void {
+    this._backoffStrategy = backoff;
+  }
+
+  /**
+   * Merges the provided config into the current retry config.
+   * Only the supplied keys are overwritten; omitted keys retain their existing values.
+   */
+  setRetryConfig(config: Partial<RetryConfig>): void {
+    this._retryConfig = { ...this._retryConfig, ...config };
+  }
+
   useAuthStrategy(strategy: AuthStrategy): void {
     this._authStrategies.push(strategy);
     this._authStrategies.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
@@ -1193,7 +1272,7 @@ class FetchEnh {
         if (result instanceof Request) {
           request = result;
         } else if (result === false) {
-          throw new Error('Auth strategy halted request.');
+          throw new AuthAbortError();
         }
       }
     }
@@ -1224,4 +1303,4 @@ export type { AuthStrategy, TokenStore } from './types/auth';
 export type { RetryClassifier, BackoffStrategy, RetryConfig } from './types/retry';
 export { MemoryTokenStore, LocalStorageTokenStore } from './auth/tokenStores';
 export { BearerTokenAuth, ApiKeyAuth, BasicAuth, CsrfTokenAuth, OAuth2ClientCredentialsAuth, OAuth2PKCEAuth } from './auth/strategies';
-export { FetchError, TimeoutError, RetryError, UnsupportedResponseTypeError } from './errors/fetchErrors';
+export { FetchError, TimeoutError, RetryError, UnsupportedResponseTypeError, InterceptorAbortError, AuthAbortError } from './errors/fetchErrors';

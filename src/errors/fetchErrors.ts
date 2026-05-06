@@ -119,6 +119,37 @@ export class RetryError extends Error {
       method: this.method,
       url: this.url,
       elapsedMs: this.elapsedMs,
+      causeError: this.causeError instanceof Error
+        ? { name: this.causeError.name, message: this.causeError.message }
+        : this.causeError,
     };
+  }
+}
+
+/**
+ * Thrown when a request or response interceptor returns `false` to halt the chain.
+ * Kept separate from plain `Error` so the retry loop in `_fetchAndParse` does not
+ * treat it as a transient network failure and re-attempt the request.
+ */
+export class InterceptorAbortError extends Error {
+  code: string;
+  constructor(message?: string) {
+    super(message ?? 'Interceptor halted request.');
+    this.name = 'InterceptorAbortError';
+    this.code = 'EINTERCEPTOR_ABORT';
+  }
+}
+
+/**
+ * Thrown when an auth strategy returns `false` from `onRequest` to halt the request.
+ * Kept separate from plain `Error` so the retry loop in `_fetchAndParse` does not
+ * treat it as a transient network failure and re-attempt the request.
+ */
+export class AuthAbortError extends Error {
+  code: string;
+  constructor(message?: string) {
+    super(message ?? 'Auth strategy halted request.');
+    this.name = 'AuthAbortError';
+    this.code = 'EAUTH_ABORT';
   }
 }

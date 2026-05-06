@@ -46,6 +46,8 @@ export interface PostOptions {
   responseType?: 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'response' | 'auto' | string;
   options?: RequestOptions;
   bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  /** Optional query parameters appended to the URL alongside the request body. */
+  query?: Record<string, any>;
 }
 
 export interface PutOptions {
@@ -55,6 +57,8 @@ export interface PutOptions {
   responseType?: 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'response' | 'auto' | string;
   options?: RequestOptions;
   bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  /** Optional query parameters appended to the URL alongside the request body. */
+  query?: Record<string, any>;
 }
 
 export interface PatchOptions {
@@ -64,6 +68,8 @@ export interface PatchOptions {
   responseType?: 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'response' | 'auto' | string;
   options?: RequestOptions;
   bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  /** Optional query parameters appended to the URL alongside the request body. */
+  query?: Record<string, any>;
 }
 
 export interface DeleteOptions {
@@ -71,6 +77,10 @@ export interface DeleteOptions {
   headers?: Record<string, string>;
   responseType?: 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'response' | 'auto' | string;
   options?: RequestOptions;
+  /** Optional request body (e.g. for batch-delete APIs that accept a body). */
+  body?: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  /** Optional query parameters appended to the URL. */
+  query?: Record<string, any>;
 }
 
 export interface RawOptions {
