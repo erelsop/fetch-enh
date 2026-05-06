@@ -4,7 +4,7 @@
  * Users can opt in to mutation-deduplication by providing a custom dedupeKey factory.
  */
 export class DeduplicationCache {
-  private _inflight: Map<string, Promise<any>> = new Map();
+  private _inflight: Map<string, Promise<unknown>> = new Map();
 
   /** The set of HTTP methods considered safe for automatic deduplication. */
   private static readonly SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -16,7 +16,7 @@ export class DeduplicationCache {
     method: string,
     url: string,
     body: string | undefined,
-    customKeyFn?: (params: { method: string; url: string; body?: any }) => string
+    customKeyFn?: (params: { method: string; url: string; body?: unknown }) => string
   ): string {
     if (customKeyFn) {
       return customKeyFn({ method, url, body });
@@ -56,8 +56,8 @@ export class DeduplicationCache {
   /**
    * Serializes a body value for use in dedup key computation.
    */
-  static serializeBodyForKey(body: any): string | undefined {
-    if (body && typeof body === 'object' &&
+  static serializeBodyForKey(body: unknown): string | undefined {
+    if (body !== null && body !== undefined && typeof body === 'object' &&
       !(body instanceof FormData) && !(body instanceof Blob) &&
       !(body instanceof ArrayBuffer) && !(body instanceof URLSearchParams)) {
       return JSON.stringify(body);

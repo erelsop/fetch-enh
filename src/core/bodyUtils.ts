@@ -99,9 +99,8 @@ export function resolveBody(
   if (retryCtx?.rawBody !== undefined) {
     return retryCtx.rawBody;
   }
-  return (
-    (request as any)._bodyInit ?? (request as any).body
-  ) as BodyInit | null | undefined;
+  // rawBody is undefined only when no body was provided
+  return null;
 }
 
 /**

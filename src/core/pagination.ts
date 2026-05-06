@@ -1,4 +1,4 @@
-import type { RequestParameters } from '../types/requestParameters';
+import type { RequestParameters, QueryValue, ResponseType } from '../types/requestParameters';
 import type { PaginateOptions } from '../types/httpMethodOptions';
 import type { RequestOptions } from '../types/requestOptions';
 
@@ -39,7 +39,7 @@ export async function paginate<T = any>(
   } = options;
 
   let currentPage = page;
-  let results: any[] = [];
+  let results: unknown[] = [];
   let iterations = 0;
 
   while (true) {
@@ -55,7 +55,7 @@ export async function paginate<T = any>(
     });
 
     if (responseType === 'json') {
-      const pageItems = Array.isArray(response)
+      const pageItems: unknown[] = Array.isArray(response)
         ? response
         : extractor
           ? extractor(response)
@@ -77,21 +77,21 @@ export async function paginate<T = any>(
     }
   }
 
-  return limit ? results.slice(0, limit) : results;
+  return (limit ? results.slice(0, limit) : results) as T[];
 }
 
 export interface CursorPaginateParams {
   endpoint: string;
   headers?: Record<string, string>;
-  query?: Record<string, any>;
-  responseType?: string;
+  query?: Record<string, QueryValue>;
+  responseType?: ResponseType;
   limit?: number;
   maxPages?: number;
   cursor?: string | null;
   cursorParamName?: string;
-  getNextCursor?: (response: any, headers: Headers) => string | null;
+  getNextCursor?: (response: unknown, headers: Headers) => string | null;
   useLinkHeader?: boolean;
-  extractor?: (response: any) => any[];
+  extractor?: (response: unknown) => unknown[];
   options?: RequestOptions;
 }
 
@@ -116,48 +116,63 @@ export async function paginateCursor<T = any>(
   } = params;
 
   let cursor = initialCursor;
-  let results: any[] = [];
+  let results: unknown[] = [];
   let iterations = 0;
 
   while (true) {
     const q = { ...query } as any;
     if (cursor) q[cursorParamName] = cursor;
 
-    let pageItems: any[] = [];
+    let pageItems: unknown[] = [];
     let nextCursor: string | null = null;
 
     if (useLinkHeader) {
+      const perCallOpts = {
+        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
+        retries: perCallOptions?.retries ?? defaults.defaultRetries,
+        signal: perCallOptions?.signal,
+      };
       const res = await requestFn({
         endpoint,
         method: 'GET',
         headers,
         query: q,
         responseType: 'response',
-        options: perCallOptions ?? { timeout: defaults.defaultTimeout, retries: defaults.defaultRetries },
+        options: perCallOpts,
       } as any);
       const data = await res.clone().json().catch(() => []);
       pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
       nextCursor = getNextCursor ? getNextCursor(data, res.headers) : parseLinkHeaderForNextCursor(res.headers, cursorParamName);
     } else if (getNextCursor) {
+      const perCallOpts = {
+        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
+        retries: perCallOptions?.retries ?? defaults.defaultRetries,
+        signal: perCallOptions?.signal,
+      };
       const res = await requestFn({
         endpoint,
         method: 'GET',
         headers,
         query: q,
         responseType: 'response',
-        options: perCallOptions ?? { timeout: defaults.defaultTimeout, retries: defaults.defaultRetries },
+        options: perCallOpts,
       } as any);
       const data = await res.clone().json().catch(() => []);
       pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
       nextCursor = getNextCursor(data, res.headers);
     } else {
-      const resp: any = await requestFn({
+      const perCallOpts = {
+        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
+        retries: perCallOptions?.retries ?? defaults.defaultRetries,
+        signal: perCallOptions?.signal,
+      };
+      const resp: unknown = await requestFn({
         endpoint,
         method: 'GET',
         headers,
         query: q,
         responseType,
-        options: perCallOptions ?? { timeout: defaults.defaultTimeout, retries: defaults.defaultRetries },
+        options: perCallOpts,
       });
       if (responseType === 'json') {
         pageItems = Array.isArray(resp) ? resp : (extractor ? extractor(resp) : []);
@@ -172,5 +187,5 @@ export async function paginateCursor<T = any>(
     cursor = nextCursor;
   }
 
-  return limit ? results.slice(0, limit) : results;
+  return (limit ? results.slice(0, limit) : results) as T[];
 }

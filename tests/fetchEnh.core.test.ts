@@ -388,6 +388,41 @@ test('default page-based pagination cap is 100', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(100);
 });
 
+// ─── H-4: Internal state encapsulation ─────────────────────────────────────
+
+test('H-4: config properties are readable via public getters', () => {
+  const api = new FetchEnh({
+    baseURL: 'https://api.test',
+    defaultHeaders: { 'X-App': 'test' },
+    defaultTimeout: 5000,
+    defaultRetries: 2,
+  });
+  expect(api.baseURL).toBe('https://api.test');
+  expect(api.defaultHeaders).toEqual({ 'X-App': 'test' });
+  expect(api.defaultTimeout).toBe(5000);
+  expect(api.defaultRetries).toBe(2);
+});
+
+test('H-4: config getter reflects setConfig changes', () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test', defaultTimeout: 0 });
+  api.setConfig({ baseURL: 'https://new.test/', defaultTimeout: 9999, defaultRetries: 5 });
+  expect(api.baseURL).toBe('https://new.test');
+  expect(api.defaultTimeout).toBe(9999);
+  expect(api.defaultRetries).toBe(5);
+});
+
+test('H-4: writing to getter-backed config property is a type error at compile time', () => {
+  // This test simply documents the intent; the TypeScript compiler enforces
+  // the read-only constraint.  At runtime the assignment is a no-op in strict
+  // mode or silently ignored — we just verify the getter still returns the
+  // correct (unchanged) value.
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  try { (api as any).baseURL = 'https://evil.test'; } catch { /* strict-mode throws */ }
+  // The setter does not exist, so either nothing changes or an error is thrown.
+  // Either way, the actual _baseURL backing field must not be overwritten.
+  expect(api.baseURL).toBe('https://api.test');
+});
+
 test('default cursor-based pagination cap is 100 (not 200)', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   fetchMock.mockResponse(

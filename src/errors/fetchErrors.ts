@@ -51,9 +51,23 @@ export class FetchError extends Error {
  * @extends Error
  */
 export class UnsupportedResponseTypeError extends Error {
+  code: string;
+  type: string;
+
   constructor(type: string) {
     super(`Unsupported response type: ${type}`);
     this.name = 'UnsupportedResponseTypeError';
+    this.code = 'EUNSUPPORTED_RESPONSE';
+    this.type = type;
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      type: this.type,
+    };
   }
 }
 
@@ -98,7 +112,7 @@ export class TimeoutError extends Error {
 export class RetryError extends Error {
   code: string;
   attempts: number;
-  causeError?: unknown;
+  declare cause?: unknown;
   method?: string;
   url?: string;
   elapsedMs?: number;
@@ -108,7 +122,7 @@ export class RetryError extends Error {
     this.code = 'ERETRY';
     this.name = 'RetryError';
     this.attempts = attempts;
-    this.causeError = causeError;
+    this.cause = causeError;
     this.method = meta?.method;
     this.url = meta?.url;
     this.elapsedMs = meta?.elapsedMs;
@@ -123,9 +137,9 @@ export class RetryError extends Error {
       method: this.method,
       url: this.url,
       elapsedMs: this.elapsedMs,
-      causeError: this.causeError instanceof Error
-        ? { name: this.causeError.name, message: this.causeError.message }
-        : this.causeError,
+      cause: this.cause instanceof Error
+        ? { name: this.cause.name, message: this.cause.message }
+        : this.cause,
     };
   }
 }

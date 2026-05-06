@@ -342,6 +342,65 @@ describe('Error Handling', () => {
     });
   });
 
+  describe('H-10: RetryError.cause (ES2022 standard)', () => {
+    test('RetryError stores underlying error as .cause, not .causeError', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
+      const networkErr = new Error('offline');
+      fetchMock.mockRejectOnce(networkErr).mockRejectOnce(new Error('offline'));
+      try {
+        await api.get({ endpoint: '/x' });
+        fail('should have thrown');
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(RetryError);
+        expect(e.causeError).toBeUndefined();
+        expect(e.cause).toBeDefined();
+        expect(e.cause).toBeInstanceOf(Error);
+      }
+    });
+
+    test('RetryError.toJSON() serialises cause key (not causeError)', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
+      fetchMock.mockRejectOnce(new Error('net')).mockRejectOnce(new Error('net'));
+      try {
+        await api.get({ endpoint: '/retry-json' });
+      } catch (e: any) {
+        const j = e.toJSON();
+        expect('causeError' in j).toBe(false);
+        expect('cause' in j).toBe(true);
+      }
+    });
+  });
+
+  describe('H-11: UnsupportedResponseTypeError completeness', () => {
+    test('has code property EUNSUPPORTED_RESPONSE', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test' });
+      fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      try {
+        await api.get({ endpoint: '/data', responseType: 'invalid' as any });
+        fail('should have thrown');
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(UnsupportedResponseTypeError);
+        expect(e.code).toBe('EUNSUPPORTED_RESPONSE');
+        expect(e.name).toBe('UnsupportedResponseTypeError');
+        expect(e.type).toBe('invalid');
+      }
+    });
+
+    test('toJSON() returns structured object', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test' });
+      fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      try {
+        await api.get({ endpoint: '/data', responseType: 'invalid' as any });
+      } catch (e: any) {
+        const j = e.toJSON();
+        expect(j.name).toBe('UnsupportedResponseTypeError');
+        expect(j.code).toBe('EUNSUPPORTED_RESPONSE');
+        expect(j.message).toContain('invalid');
+        expect(j.type).toBe('invalid');
+      }
+    });
+  });
+
   describe('Hooks', () => {
     test('onRetry is called with attempt and delay on 5xx', async () => {
       const calls: any[] = [];

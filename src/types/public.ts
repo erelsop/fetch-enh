@@ -12,3 +12,5 @@ export type {
   RawOptions,
 } from './httpMethodOptions';
 export type { RequestInterceptor, ResponseInterceptor } from './interceptors';
+export type { AuthStrategy, TokenStore } from './auth';
+export type { RetryClassifier, BackoffStrategy, RetryConfig } from './retry';

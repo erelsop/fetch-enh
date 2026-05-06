@@ -63,21 +63,27 @@ import { paginate, paginateCursor } from './core/pagination';
  *
  */
 class FetchEnh {
-  // ── Configuration state ───────────────────────────────────────────────────
-  baseURL: string;
-  defaultHeaders: Record<string, string>;
-  defaultTimeout: number;
-  defaultRetries: number;
-  _queryStyle: QueryStyle = { array: 'brackets', object: 'brackets' };
-  _dedupe: boolean = false;
-  _dedupeKey?: (params: { method: string; url: string; body?: any }) => string;
-  _onRetry?: (info: { attempt: number; delay: number; method: string; url: string; reason: 'status' | 'network'; status?: number }) => void;
-  _onComplete?: (info: { method: string; url: string; status?: number; ok: boolean; attempts: number; elapsedMs: number }) => void;
+  // ── Private configuration backing fields ──────────────────────────────────
+  private _baseURL: string;
+  private _defaultHeaders: Record<string, string>;
+  private _defaultTimeout: number;
+  private _defaultRetries: number;
+  private _queryStyle: QueryStyle = { array: 'brackets', object: 'brackets' };
+  private _dedupe: boolean = false;
+  private _dedupeKey?: (params: { method: string; url: string; body?: unknown }) => string;
+  private _onRetry?: (info: { attempt: number; delay: number; method: string; url: string; reason: 'status' | 'network'; status?: number }) => void;
+  private _onComplete?: (info: { method: string; url: string; status?: number; ok: boolean; attempts: number; elapsedMs: number }) => void;
 
-  // ── Retry configuration ──────────────────────────────────────────────────
-  _retryClassifier: RetryClassifier | null = null;
-  _backoffStrategy: BackoffStrategy | null = null;
-  _retryConfig: RetryConfig = { idempotentOnly: true, respectRetryAfter: true };
+  // ── Private retry configuration ───────────────────────────────────────────
+  private _retryClassifier: RetryClassifier | null = null;
+  private _backoffStrategy: BackoffStrategy | null = null;
+  private _retryConfig: RetryConfig = { idempotentOnly: true, respectRetryAfter: true };
+
+  // ── Public read-only accessors ────────────────────────────────────────────
+  get baseURL(): string { return this._baseURL; }
+  get defaultHeaders(): Record<string, string> { return this._defaultHeaders; }
+  get defaultTimeout(): number { return this._defaultTimeout; }
+  get defaultRetries(): number { return this._defaultRetries; }
 
   // ── Composed modules ─────────────────────────────────────────────────────
   private _interceptors = new InterceptorPipeline();
@@ -95,12 +101,12 @@ class FetchEnh {
     onRetry,
     onComplete,
   }: FetchEnhConfig) {
-    this.baseURL = baseURL.endsWith('/')
+    this._baseURL = baseURL.endsWith('/')
       ? baseURL.slice(0, -1)
       : baseURL;
-    this.defaultHeaders = { ...defaultHeaders };
-    this.defaultTimeout = defaultTimeout;
-    this.defaultRetries = defaultRetries;
+    this._defaultHeaders = { ...defaultHeaders };
+    this._defaultTimeout = defaultTimeout;
+    this._defaultRetries = defaultRetries;
     if (queryStyle) {
       this._queryStyle = {
         array: queryStyle.array ?? this._queryStyle.array,
@@ -233,10 +239,11 @@ class FetchEnh {
           );
         }
 
-        // ── Parse error body ────────────────────────────────────────────
+        // ── Parse error body ──────────────────────────────────────────────────
+        // Clone before consuming so auth strategies can still inspect the body.
         let errorData;
         try {
-          errorData = await interceptedResponse.json();
+          errorData = await interceptedResponse.clone().json();
         } catch {
           errorData = { message: 'Unable to parse error data.' };
         }
@@ -287,7 +294,7 @@ class FetchEnh {
             return parseBody(retryIntercepted, responseType);
           }
           if (authResult === false) {
-            throw new Error('Auth strategy halted after auth error.');
+            throw new AuthAbortError('Auth strategy halted after auth error.');
           }
         }
 
@@ -481,9 +488,10 @@ class FetchEnh {
       method: 'GET',
       headers,
       responseType,
-      options: perCallOptions ?? {
-        timeout: this.defaultTimeout,
-        retries: this.defaultRetries,
+      options: {
+        timeout: perCallOptions?.timeout ?? this.defaultTimeout,
+        retries: perCallOptions?.retries ?? this.defaultRetries,
+        signal: perCallOptions?.signal,
       },
     };
 
@@ -677,16 +685,16 @@ class FetchEnh {
     }
     if ('baseURL' in config && config.baseURL !== undefined) {
       const v = config.baseURL;
-      this.baseURL = v.endsWith('/') ? v.slice(0, -1) : v;
+      this._baseURL = v.endsWith('/') ? v.slice(0, -1) : v;
     }
     if ('defaultHeaders' in config && config.defaultHeaders !== undefined) {
-      this.defaultHeaders = config.defaultHeaders;
+      this._defaultHeaders = config.defaultHeaders;
     }
     if ('defaultTimeout' in config && config.defaultTimeout !== undefined) {
-      this.defaultTimeout = config.defaultTimeout;
+      this._defaultTimeout = config.defaultTimeout;
     }
     if ('defaultRetries' in config && config.defaultRetries !== undefined) {
-      this.defaultRetries = config.defaultRetries;
+      this._defaultRetries = config.defaultRetries;
     }
     if ('queryStyle' in config && config.queryStyle) {
       this._queryStyle = {

@@ -8,7 +8,7 @@ export interface FetchEnhConfig {
     object?: 'brackets' | 'dot';
   };
   dedupe?: boolean;
-  dedupeKey?: (params: { method: string; url: string; body?: any }) => string;
+  dedupeKey?: (params: { method: string; url: string; body?: unknown }) => string;
   onRetry?: (info: { attempt: number; delay: number; method: string; url: string; reason: 'status' | 'network'; status?: number }) => void;
   onComplete?: (info: { method: string; url: string; status?: number; ok: boolean; attempts: number; elapsedMs: number }) => void;
 }

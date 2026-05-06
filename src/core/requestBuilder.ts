@@ -1,4 +1,4 @@
-import type { BodyType } from '../types/requestParameters';
+import type { BodyType, QueryValue } from '../types/requestParameters';
 import { setContentTypeHeader, serializeBody } from './bodyUtils';
 
 export interface QueryStyle {
@@ -12,7 +12,7 @@ export interface BuildRequestParams {
   method: string;
   body?: BodyType;
   headers?: Record<string, string>;
-  query?: Record<string, any>;
+  query?: Record<string, QueryValue>;
   queryStyle: QueryStyle;
   defaultHeaders: Record<string, string>;
 }
@@ -32,7 +32,7 @@ export function formatEndpoint(baseURL: string, endpoint: string): string {
  * (brackets / dot styles), Dates (ISO 8601), and primitive values.
  */
 export function serializeQuery(
-  params: Record<string, any>,
+  params: Record<string, QueryValue>,
   queryStyle: QueryStyle,
 ): string {
   const parts: string[] = [];

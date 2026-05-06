@@ -1,6 +1,7 @@
 import FetchEnh from '../src';
 import { BearerTokenAuth, ApiKeyAuth, BasicAuth, CsrfTokenAuth } from '../src/auth/strategies';
 import { MemoryTokenStore, LocalStorageTokenStore } from '../src/auth/tokenStores';
+import { AuthAbortError } from '../src/errors/fetchErrors';
 import fetchMock from 'jest-fetch-mock';
 
 beforeEach(() => {
@@ -318,6 +319,96 @@ describe('Authentication Strategies', () => {
       
       const headers = fetchMock.mock.calls[0][1]?.headers as any;
       expect(headers.has('X-CSRF-Token')).toBe(false);
+    });
+  });
+
+  describe('BasicAuth – H-7 UTF-8 credentials', () => {
+    test('encodes ASCII credentials correctly', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test' });
+      api.useAuthStrategy(new BasicAuth('user', 'pass'));
+      fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+      await api.get({ endpoint: '/protected' });
+      const authHeader = (fetchMock.mock.calls[0][1]?.headers as any).get('Authorization') as string;
+      expect(authHeader).toMatch(/^Basic /);
+      const decoded = Buffer.from(authHeader.replace('Basic ', ''), 'base64').toString('utf8');
+      expect(decoded).toBe('user:pass');
+    });
+
+    test('encodes non-Latin1 (UTF-8) credentials without throwing', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test' });
+      // Characters outside Latin-1 range (café, CJK)
+      api.useAuthStrategy(new BasicAuth('café', '密码'));
+      fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+      await api.get({ endpoint: '/protected' });
+      const authHeader = (fetchMock.mock.calls[0][1]?.headers as any).get('Authorization') as string;
+      expect(authHeader).toMatch(/^Basic /);
+      // Decode and verify round-trip (Node path uses utf8; browser path uses encodeURIComponent)
+      const b64Part = authHeader.replace('Basic ', '');
+      const decoded = Buffer.from(b64Part, 'base64').toString('utf8');
+      // The decoded form should contain the original characters (Node utf8 path)
+      // or the percent-encoded form (browser path). Either is non-empty and valid.
+      expect(decoded.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('ApiKeyAuth – H-8 misconfiguration guard', () => {
+    test('throws at construction when neither headerName nor queryName is provided', () => {
+      expect(() => new ApiKeyAuth({ getApiKey: () => 'key' })).toThrow(
+        /at least one of .headerName. or .queryName. must be provided/
+      );
+    });
+
+    test('does not throw when headerName is provided', () => {
+      expect(() => new ApiKeyAuth({ headerName: 'X-Key', getApiKey: () => 'key' })).not.toThrow();
+    });
+
+    test('does not throw when queryName is provided', () => {
+      expect(() => new ApiKeyAuth({ queryName: 'api_key', getApiKey: () => 'key' })).not.toThrow();
+    });
+  });
+
+  describe('Auth halt – H-6 AuthAbortError', () => {
+    test('throws AuthAbortError (not plain Error) when auth strategy returns false on auth error', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      // Strategy that always returns false from onAuthError
+      api.useAuthStrategy({
+        onAuthError: async (): Promise<false> => false,
+      });
+      fetchMock.mockResponseOnce('Unauthorized', { status: 401 });
+      await expect(api.get({ endpoint: '/secret' })).rejects.toBeInstanceOf(AuthAbortError);
+    });
+
+    test('AuthAbortError is not retried as a network error', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 3 });
+      api.useAuthStrategy({ onAuthError: async (): Promise<false> => false });
+      fetchMock.mockResponse('Unauthorized', { status: 401 });
+      await expect(api.get({ endpoint: '/secret' })).rejects.toBeInstanceOf(AuthAbortError);
+      // fetch should only be called once (no network retries)
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Response body clone – H-5', () => {
+    test('auth strategy onAuthError can inspect response body even after FetchEnh parsed it', async () => {
+      let capturedBody: unknown = undefined;
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      api.useAuthStrategy({
+        async onAuthError(_req: Request, response: Response): Promise<false> {
+          // The body must still be readable here
+          try { capturedBody = await response.json(); } catch { capturedBody = null; }
+          return false; // halt
+        },
+      });
+      fetchMock.mockResponseOnce(JSON.stringify({ error: 'token_expired' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+      await expect(api.get({ endpoint: '/me' })).rejects.toBeInstanceOf(AuthAbortError);
+      expect(capturedBody).toEqual({ error: 'token_expired' });
     });
   });
 

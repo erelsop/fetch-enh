@@ -11,6 +11,11 @@ export class ApiKeyAuth implements AuthStrategy {
     this.queryName = params.queryName;
     this.getApiKey = params.getApiKey;
     this.priority = params.priority;
+    if (!this.headerName && !this.queryName) {
+      throw new Error(
+        '[FetchEnh] ApiKeyAuth: at least one of `headerName` or `queryName` must be provided.'
+      );
+    }
   }
 
   async onRequest(request: Request): Promise<Request | void> {
@@ -40,9 +45,17 @@ export class BasicAuth implements AuthStrategy {
   }
   onRequest(request: Request): Request {
     const headers = new Headers(request.headers);
-    const encoded = typeof btoa !== 'undefined'
-      ? btoa(`${this.username}:${this.password}`)
-      : Buffer.from(`${this.username}:${this.password}`).toString('base64');
+    const credentials = `${this.username}:${this.password}`;
+    // Use Buffer in Node; in browsers encode UTF-8 bytes via TextEncoder so
+    // that characters outside Latin-1 (e.g. café, CJK) don't throw in btoa.
+    const encoded = typeof Buffer !== 'undefined'
+      ? Buffer.from(credentials, 'utf8').toString('base64')
+      : btoa(
+          Array.from(
+            new TextEncoder().encode(credentials),
+            (b) => String.fromCharCode(b),
+          ).join(''),
+        );
     headers.set('Authorization', `Basic ${encoded}`);
     return new Request(request, { headers });
   }
