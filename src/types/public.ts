@@ -5,6 +5,7 @@ export type {
   HeadOptions,
   PaginateOptions,
   GetOptions,
+  MutationOptions,
   PostOptions,
   PutOptions,
   PatchOptions,

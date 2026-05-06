@@ -1,8 +1,8 @@
 /**
  * fetchEnh.critical.test.ts
  *
- * Targeted tests for the untested critical code paths identified in the
- * production viability audit (C-4, C-8 coverage items).
+ * Targeted tests for critical code paths: error class names, content-type
+ * handling, retry mechanics, interceptor/auth abort, and response type parsing.
  */
 
 import FetchEnh from '../src';
@@ -25,11 +25,7 @@ beforeEach(() => {
   jest.useRealTimers();
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-4 · Error class this.name property
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Error class names (C-4)', () => {
+describe('error class this.name property', () => {
   test('FetchError.name === "FetchError"', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
     fetchMock.mockResponseOnce(JSON.stringify({ error: 'not found' }), {
@@ -94,11 +90,7 @@ describe('Error class names (C-4)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-2 · URLSearchParams does not get Content-Type: application/json
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('URLSearchParams content-type (C-2)', () => {
+describe('URLSearchParams body does not get Content-Type: application/json', () => {
   test('URLSearchParams body does not receive Content-Type: application/json', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
     fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), {
@@ -115,11 +107,7 @@ describe('URLSearchParams content-type (C-2)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · Granular retry setters: setRetryClassifier / setBackoffStrategy / setRetryConfig
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Granular retry setters (C-8)', () => {
+describe('granular retry setters', () => {
   test('setRetryClassifier: custom classifier prevents retry on 503', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 2 });
     // Never retry anything
@@ -198,11 +186,7 @@ describe('Granular retry setters (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · Interceptor abort: false return → InterceptorAbortError
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Interceptor abort (C-8)', () => {
+describe('interceptor abort via InterceptorAbortError', () => {
   test('request interceptor returning false throws InterceptorAbortError', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
     api.addRequestInterceptor({ handler: () => false as any });
@@ -237,11 +221,7 @@ describe('Interceptor abort (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · Auth strategy returning false → AuthAbortError
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Auth strategy abort (C-8)', () => {
+describe('auth strategy abort via AuthAbortError', () => {
   test('auth onRequest returning false throws AuthAbortError', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
     const haltingStrategy: AuthStrategy = { onRequest: () => false };
@@ -265,11 +245,7 @@ describe('Auth strategy abort (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · maxElapsedMs retry-window cap
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('maxElapsedMs cap (C-8)', () => {
+describe('maxElapsedMs retry-window cap', () => {
   test('throws TimeoutError when maxElapsedMs budget is exceeded before retry delay elapses', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 5 });
     // Tiny budget + non-zero delay so budget check fires immediately
@@ -284,11 +260,7 @@ describe('maxElapsedMs cap (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · removeResponseInterceptor
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('removeResponseInterceptor (C-8)', () => {
+describe('removeResponseInterceptor', () => {
   test('removes a specific response interceptor while leaving others intact', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
 
@@ -326,11 +298,7 @@ describe('removeResponseInterceptor (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · blob / arrayBuffer response type branches
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Binary response types (C-8)', () => {
+describe('binary response types', () => {
   test('responseType: blob returns a Blob instance', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
     fetchMock.mockResponseOnce('binary-data', {
@@ -364,11 +332,7 @@ describe('Binary response types (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · Retry-After date-string path in defaultBackoffDelay
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Retry-After date-string backoff path (C-8)', () => {
+describe('Retry-After date-string backoff path', () => {
   test('returns a positive delay for a future Retry-After date string', () => {
     const futureDate = new Date(Date.now() + 30_000).toUTCString(); // 30 s ahead
     const mockResponse = new Response('', {
@@ -416,11 +380,7 @@ describe('Retry-After date-string backoff path (C-8)', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// C-8 · Concurrent auth-refresh deduplication (refreshingPromise)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Concurrent auth-refresh deduplication (C-8)', () => {
+describe('concurrent auth-refresh deduplication', () => {
   test('BearerTokenAuth: concurrent onAuthError calls invoke refresh only once', async () => {
     let resolveRefresh!: (token: string | null) => void;
     const refresh = jest.fn(

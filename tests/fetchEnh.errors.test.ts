@@ -9,12 +9,18 @@ beforeEach(() => {
 describe('Error Handling', () => {
   describe('FetchError', () => {
     test('throws FetchError on 4xx client errors', async () => {
+      expect.assertions(3);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
       
-      fetchMock.mockResponseOnce(
-        JSON.stringify({ error: 'Not found', code: 'NOT_FOUND' }),
-        { status: 404, headers: { 'content-type': 'application/json' } }
-      );
+      fetchMock
+        .mockResponseOnce(
+          JSON.stringify({ error: 'Not found', code: 'NOT_FOUND' }),
+          { status: 404, headers: { 'content-type': 'application/json' } }
+        )
+        .mockResponseOnce(
+          JSON.stringify({ error: 'Not found', code: 'NOT_FOUND' }),
+          { status: 404, headers: { 'content-type': 'application/json' } }
+        );
       
       await expect(api.get({ endpoint: '/missing' })).rejects.toThrow(FetchError);
       
@@ -41,6 +47,7 @@ describe('Error Handling', () => {
     });
 
     test('includes response data in FetchError', async () => {
+      expect.assertions(2);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
       
       fetchMock.mockResponseOnce(
@@ -59,9 +66,11 @@ describe('Error Handling', () => {
     });
 
     test('handles non-JSON error responses', async () => {
+      expect.assertions(1);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
       
-      fetchMock.mockResponseOnce('Internal Server Error', { status: 500 });
+      // Use 400 Bad Request (not retryable) so FetchError is thrown directly
+      fetchMock.mockResponseOnce('Bad Request', { status: 400 });
       
       try {
         await api.get({ endpoint: '/error' });
@@ -149,13 +158,14 @@ describe('Error Handling', () => {
   });
 
   describe('Edge Cases', () => {
-    test('handles empty response body', async () => {
+    test('handles empty response body (204 No Content returns null)', async () => {
       const api = new FetchEnh({ baseURL: 'https://api.test' });
       
+      // 204 No Content carries no body; parseBody returns null
       fetchMock.mockResponseOnce('', { status: 204 });
       
       const result = await api.delete({ endpoint: '/resource/1', responseType: 'text' });
-      expect(result).toBe('');
+      expect(result).toBeNull();
     });
 
     test('handles response without content-type in auto mode', async () => {
@@ -313,6 +323,7 @@ describe('Error Handling', () => {
 
   describe('New Error Model', () => {
     test('FetchError has structured metadata and toJSON', async () => {
+      expect.assertions(5);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
       fetchMock.mockResponseOnce(JSON.stringify({ error: 'nope' }), { status: 400, headers: { 'content-type': 'application/json', 'x-request-id': 'req-123' } });
       try {
@@ -328,6 +339,7 @@ describe('Error Handling', () => {
     });
 
     test('RetryError has structured metadata and toJSON', async () => {
+      expect.assertions(4);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
       fetchMock.mockRejectOnce(new Error('offline')).mockRejectOnce(new Error('offline'));
       try {
@@ -342,8 +354,9 @@ describe('Error Handling', () => {
     });
   });
 
-  describe('H-10: RetryError.cause (ES2022 standard)', () => {
+  describe('RetryError.cause (ES2022 standard)', () => {
     test('RetryError stores underlying error as .cause, not .causeError', async () => {
+      expect.assertions(4);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
       const networkErr = new Error('offline');
       fetchMock.mockRejectOnce(networkErr).mockRejectOnce(new Error('offline'));
@@ -359,6 +372,7 @@ describe('Error Handling', () => {
     });
 
     test('RetryError.toJSON() serialises cause key (not causeError)', async () => {
+      expect.assertions(2);
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
       fetchMock.mockRejectOnce(new Error('net')).mockRejectOnce(new Error('net'));
       try {
@@ -371,8 +385,9 @@ describe('Error Handling', () => {
     });
   });
 
-  describe('H-11: UnsupportedResponseTypeError completeness', () => {
+  describe('UnsupportedResponseTypeError completeness', () => {
     test('has code property EUNSUPPORTED_RESPONSE', async () => {
+      expect.assertions(4);
       const api = new FetchEnh({ baseURL: 'https://api.test' });
       fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
       try {
@@ -387,6 +402,7 @@ describe('Error Handling', () => {
     });
 
     test('toJSON() returns structured object', async () => {
+      expect.assertions(4);
       const api = new FetchEnh({ baseURL: 'https://api.test' });
       fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
       try {

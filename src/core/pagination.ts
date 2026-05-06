@@ -26,6 +26,29 @@ export async function paginate<T = any>(
   options: PaginateOptions,
   requestFn: (params: RequestParameters) => Promise<any>
 ): Promise<T[]> {
+  const results: T[] = [];
+  for await (const page of paginateIter<T>(options, requestFn)) {
+    results.push(...page);
+  }
+  const { limit } = options;
+  return limit ? results.slice(0, limit) : results;
+}
+
+/**
+ * Async generator variant of {@link paginate}.
+ *
+ * Yields one page of results at a time so callers can process data
+ * incrementally without buffering the entire result set in memory.
+ *
+ * @example
+ * for await (const page of paginateIter(opts, requestFn)) {
+ *   processPage(page);
+ * }
+ */
+export async function* paginateIter<T = any>(
+  options: PaginateOptions,
+  requestFn: (params: RequestParameters) => Promise<any>
+): AsyncGenerator<T[]> {
   const {
     endpoint,
     headers,
@@ -39,7 +62,7 @@ export async function paginate<T = any>(
   } = options;
 
   let currentPage = page;
-  let results: unknown[] = [];
+  let totalYielded = 0;
   let iterations = 0;
 
   while (true) {
@@ -55,29 +78,29 @@ export async function paginate<T = any>(
     });
 
     if (responseType === 'json') {
-      const pageItems: unknown[] = Array.isArray(response)
+      const pageItems: T[] = Array.isArray(response)
         ? response
         : extractor
-          ? extractor(response)
+          ? (extractor(response) as T[])
           : [];
-      if (!Array.isArray(pageItems)) break;
-      results = results.concat(pageItems);
+      if (!Array.isArray(pageItems) || pageItems.length === 0) break;
 
-      if (
-        (limit && results.length >= limit) ||
-        pageItems.length < pageSize ||
-        ++iterations >= maxPages
-      ) {
-        break;
+      if (limit) {
+        const remaining = limit - totalYielded;
+        const toYield = pageItems.slice(0, remaining);
+        yield toYield;
+        totalYielded += toYield.length;
+        if (totalYielded >= limit) break;
+      } else {
+        yield pageItems;
       }
 
+      if (pageItems.length < pageSize || ++iterations >= maxPages) break;
       currentPage++;
     } else {
       break;
     }
   }
-
-  return (limit ? results.slice(0, limit) : results) as T[];
 }
 
 export interface CursorPaginateParams {
@@ -100,6 +123,26 @@ export async function paginateCursor<T = any>(
   requestFn: (params: RequestParameters) => Promise<any>,
   defaults: { defaultTimeout: number; defaultRetries: number }
 ): Promise<T[]> {
+  const results: T[] = [];
+  for await (const page of paginateCursorIter<T>(params, requestFn, defaults)) {
+    results.push(...page);
+  }
+  const { limit } = params;
+  return limit ? results.slice(0, limit) : results;
+}
+
+/**
+ * Async generator variant of {@link paginateCursor}.
+ *
+ * Yields one page of results at a time.  JSON parse failures are propagated
+ * as errors rather than silently swallowed, giving callers an accurate signal
+ * that the server returned malformed data.
+ */
+export async function* paginateCursorIter<T = any>(
+  params: CursorPaginateParams,
+  requestFn: (params: RequestParameters) => Promise<any>,
+  defaults: { defaultTimeout: number; defaultRetries: number }
+): AsyncGenerator<T[]> {
   const {
     endpoint,
     headers = {},
@@ -116,22 +159,24 @@ export async function paginateCursor<T = any>(
   } = params;
 
   let cursor = initialCursor;
-  let results: unknown[] = [];
+  let totalYielded = 0;
   let iterations = 0;
 
   while (true) {
     const q = { ...query } as any;
     if (cursor) q[cursorParamName] = cursor;
 
-    let pageItems: unknown[] = [];
+    let pageItems: T[] = [];
     let nextCursor: string | null = null;
 
-    if (useLinkHeader) {
-      const perCallOpts = {
-        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
-        retries: perCallOptions?.retries ?? defaults.defaultRetries,
-        signal: perCallOptions?.signal,
-      };
+    const perCallOpts = {
+      timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
+      retries: perCallOptions?.retries ?? defaults.defaultRetries,
+      signal: perCallOptions?.signal,
+      retry: perCallOptions?.retry,
+    };
+
+    if (useLinkHeader || getNextCursor) {
       const res = await requestFn({
         endpoint,
         method: 'GET',
@@ -140,32 +185,12 @@ export async function paginateCursor<T = any>(
         responseType: 'response',
         options: perCallOpts,
       } as any);
-      const data = await res.clone().json().catch(() => []);
-      pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
-      nextCursor = getNextCursor ? getNextCursor(data, res.headers) : parseLinkHeaderForNextCursor(res.headers, cursorParamName);
-    } else if (getNextCursor) {
-      const perCallOpts = {
-        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
-        retries: perCallOptions?.retries ?? defaults.defaultRetries,
-        signal: perCallOptions?.signal,
-      };
-      const res = await requestFn({
-        endpoint,
-        method: 'GET',
-        headers,
-        query: q,
-        responseType: 'response',
-        options: perCallOpts,
-      } as any);
-      const data = await res.clone().json().catch(() => []);
-      pageItems = Array.isArray(data) ? data : (extractor ? extractor(data) : []);
-      nextCursor = getNextCursor(data, res.headers);
+      const data = await res.clone().json();
+      pageItems = (Array.isArray(data) ? data : (extractor ? extractor(data) : [])) as T[];
+      nextCursor = getNextCursor
+        ? getNextCursor(data, res.headers)
+        : parseLinkHeaderForNextCursor(res.headers, cursorParamName);
     } else {
-      const perCallOpts = {
-        timeout: perCallOptions?.timeout ?? defaults.defaultTimeout,
-        retries: perCallOptions?.retries ?? defaults.defaultRetries,
-        signal: perCallOptions?.signal,
-      };
       const resp: unknown = await requestFn({
         endpoint,
         method: 'GET',
@@ -175,17 +200,23 @@ export async function paginateCursor<T = any>(
         options: perCallOpts,
       });
       if (responseType === 'json') {
-        pageItems = Array.isArray(resp) ? resp : (extractor ? extractor(resp) : []);
+        pageItems = (Array.isArray(resp) ? resp : (extractor ? extractor(resp) : [])) as T[];
       }
     }
 
-    if (!Array.isArray(pageItems)) break;
-    results = results.concat(pageItems);
-    if (limit && results.length >= limit) break;
+    if (!Array.isArray(pageItems) || pageItems.length === 0) break;
 
-    if (!nextCursor || pageItems.length === 0 || ++iterations >= maxPages) break;
+    if (limit) {
+      const remaining = limit - totalYielded;
+      const toYield = pageItems.slice(0, remaining);
+      yield toYield;
+      totalYielded += toYield.length;
+      if (totalYielded >= limit) break;
+    } else {
+      yield pageItems;
+    }
+
+    if (!nextCursor || ++iterations >= maxPages) break;
     cursor = nextCursor;
   }
-
-  return (limit ? results.slice(0, limit) : results) as T[];
 }

@@ -47,6 +47,20 @@ export class AuthPipeline {
     return undefined;
   }
 
+  /** Removes all registered auth strategies. */
+  clearAuthStrategies(): void {
+    this._authStrategies = [];
+  }
+
+  /**
+   * Removes a specific auth strategy by reference.
+   * Has no effect if the strategy is not currently registered.
+   */
+  removeAuthStrategy(strategy: AuthStrategy): void {
+    const idx = this._authStrategies.indexOf(strategy);
+    if (idx !== -1) this._authStrategies.splice(idx, 1);
+  }
+
   get strategies(): readonly AuthStrategy[] {
     return this._authStrategies;
   }

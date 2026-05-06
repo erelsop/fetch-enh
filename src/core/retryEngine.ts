@@ -30,7 +30,7 @@ export function defaultBackoffDelay(
     const ra = response.headers.get('retry-after');
     if (ra) {
       const seconds = Number(ra);
-      if (!Number.isNaN(seconds)) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+      if (!Number.isNaN(seconds)) return Math.max(0, Math.min(seconds * 1000, MAX_RETRY_AFTER_MS));
       const dateMs = Date.parse(ra);
       if (!Number.isNaN(dateMs)) {
         const diff = dateMs - Date.now();
@@ -47,9 +47,29 @@ export function defaultBackoffDelay(
 
 /**
  * Returns a promise that resolves after {@link ms} milliseconds.
+ *
+ * If an optional {@link AbortSignal} is provided and it fires before the
+ * timer completes, the promise is rejected immediately with an `AbortError`
+ * so that the caller is not held up for the full delay after cancellation.
  */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      const err: any = new Error('The operation was aborted.');
+      err.name = 'AbortError';
+      reject(err);
+      return;
+    }
+    const id = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(id);
+        const err: any = new Error('The operation was aborted.');
+        err.name = 'AbortError';
+        reject(err);
+      }, { once: true });
+    }
+  });
 }
 
 /**

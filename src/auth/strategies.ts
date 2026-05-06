@@ -179,9 +179,20 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      throw new Error(
+        `[FetchEnh] OAuth2ClientCredentialsAuth: token endpoint returned HTTP ${res.status}` +
+        (errorText ? `. Response: ${errorText}` : '.')
+      );
+    }
     const json = await res.json() as OAuth2TokenResponse;
-    const token = json.access_token || null;
+    if (!json?.access_token || typeof json.access_token !== 'string') {
+      throw new Error(
+        '[FetchEnh] OAuth2ClientCredentialsAuth: token endpoint response is missing a valid `access_token` string.'
+      );
+    }
+    const token = json.access_token;
     this.expiresAt = json.expires_in ? (Date.now() + json.expires_in * 1000) : null;
     this.store.setToken(token);
     return token;

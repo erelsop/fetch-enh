@@ -322,7 +322,7 @@ describe('Authentication Strategies', () => {
     });
   });
 
-  describe('BasicAuth – H-7 UTF-8 credentials', () => {
+  describe('BasicAuth encodes UTF-8 credentials', () => {
     test('encodes ASCII credentials correctly', async () => {
       const api = new FetchEnh({ baseURL: 'https://api.test' });
       api.useAuthStrategy(new BasicAuth('user', 'pass'));
@@ -355,7 +355,7 @@ describe('Authentication Strategies', () => {
     });
   });
 
-  describe('ApiKeyAuth – H-8 misconfiguration guard', () => {
+  describe('ApiKeyAuth misconfiguration guard', () => {
     test('throws at construction when neither headerName nor queryName is provided', () => {
       expect(() => new ApiKeyAuth({ getApiKey: () => 'key' })).toThrow(
         /at least one of .headerName. or .queryName. must be provided/
@@ -371,7 +371,7 @@ describe('Authentication Strategies', () => {
     });
   });
 
-  describe('Auth halt – H-6 AuthAbortError', () => {
+  describe('Auth halt via AuthAbortError', () => {
     test('throws AuthAbortError (not plain Error) when auth strategy returns false on auth error', async () => {
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
       // Strategy that always returns false from onAuthError
@@ -392,7 +392,7 @@ describe('Authentication Strategies', () => {
     });
   });
 
-  describe('Response body clone – H-5', () => {
+  describe('Response body clone for auth error inspection', () => {
     test('auth strategy onAuthError can inspect response body even after FetchEnh parsed it', async () => {
       let capturedBody: unknown = undefined;
       const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });

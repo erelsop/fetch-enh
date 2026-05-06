@@ -45,7 +45,7 @@ import {
   classifyRetry,
 } from './core/retryEngine';
 import { DeduplicationCache } from './core/deduplication';
-import { paginate, paginateCursor } from './core/pagination';
+import { paginate, paginateCursor, paginateIter, paginateCursorIter } from './core/pagination';
 
 /**
  * FetchEnh is a utility class designed to streamline fetch requests.
@@ -168,9 +168,11 @@ class FetchEnh {
     externalSignal?: AbortSignal,
     attempt: number = 1,
     startTime: number = Date.now(),
-    retryCtx?: RetryContext
+    retryCtx?: RetryContext,
+    /** Per-call retry config. When provided, overrides the instance-level `_retryConfig`. */
+    callRetryConfig?: RetryConfig
   ): Promise<
-    JSON | string | Blob | ArrayBuffer | FormData | Response
+    JSON | string | Blob | ArrayBuffer | FormData | Response | null
   > {
     if (externalSignal?.aborted) {
       const abortErr: any = new Error('The operation was aborted');
@@ -178,6 +180,11 @@ class FetchEnh {
       throw abortErr;
     }
 
+    const effectiveRetryConfig = callRetryConfig ?? this._retryConfig;
+
+    // NOTE: The timeout budget begins here, before request interceptors and auth
+    // strategies execute. Slow interceptors consume timeout before the actual
+    // network call. Keep interceptors fast or increase the timeout accordingly.
     const controller = new AbortController();
     let timedOut = false;
     const timeoutId = timeout > 0 ? setTimeout(
@@ -213,7 +220,7 @@ class FetchEnh {
       const interceptedResponse = await this._applyResponseInterceptors(response);
 
       if (!interceptedResponse.ok) {
-        const allowRetry = isRetryAllowed(method, this._retryConfig, retryCtx);
+        const allowRetry = isRetryAllowed(method, effectiveRetryConfig, retryCtx);
         const classifierResult = classifyRetry(
           interceptedResponse, method, attempt, this._retryClassifier
         );
@@ -221,21 +228,21 @@ class FetchEnh {
         // ── Retryable failure ───────────────────────────────────────────
         if (retries > 0 && allowRetry && classifierResult) {
           const delay = computeDelay(
-            attempt, this._retryConfig, this._backoffStrategy, interceptedResponse
+            attempt, effectiveRetryConfig, this._backoffStrategy, interceptedResponse
           );
           if (this._onRetry) {
             this._onRetry({ attempt, delay, method, url: request.url, reason: 'status', status: interceptedResponse.status });
           }
-          if (this._retryConfig.maxElapsedMs && Date.now() - startTime + delay > this._retryConfig.maxElapsedMs) {
+          if (effectiveRetryConfig.maxElapsedMs && Date.now() - startTime + delay > effectiveRetryConfig.maxElapsedMs) {
             throw new TimeoutError({ elapsedMs: Date.now() - startTime, cause: new Error('maxElapsedMs exceeded') });
           }
-          await sleep(delay);
+          await sleep(delay, externalSignal);
 
-          const nextRequest = buildRetryRequest(request, method, this._retryConfig, retryCtx);
+          const nextRequest = buildRetryRequest(request, method, effectiveRetryConfig, retryCtx);
 
           return this._fetchAndParse(
             nextRequest, responseType, retries - 1, timeout,
-            externalSignal, attempt + 1, startTime, retryCtx
+            externalSignal, attempt + 1, startTime, retryCtx, callRetryConfig
           );
         }
 
@@ -338,26 +345,26 @@ class FetchEnh {
         throw error;
       }
 
-      // ── Network error — retry if possible ─────────────────────────────
+      // ── Network error — retry if possible ───────────────────────────────────
       const method = request.method.toUpperCase();
-      const allowRetry = isRetryAllowed(method, this._retryConfig, retryCtx);
+      const allowRetry = isRetryAllowed(method, effectiveRetryConfig, retryCtx);
       if (retries > 0 && allowRetry) {
         const delay = computeDelay(
-          attempt, this._retryConfig, this._backoffStrategy, undefined, error
+          attempt, effectiveRetryConfig, this._backoffStrategy, undefined, error
         );
         if (this._onRetry) {
           this._onRetry({ attempt, delay, method, url: request.url, reason: 'network' });
         }
-        if (this._retryConfig.maxElapsedMs && Date.now() - startTime + delay > this._retryConfig.maxElapsedMs) {
+        if (effectiveRetryConfig.maxElapsedMs && Date.now() - startTime + delay > effectiveRetryConfig.maxElapsedMs) {
           throw new TimeoutError({ elapsedMs: Date.now() - startTime, cause: new Error('maxElapsedMs exceeded') });
         }
-        await sleep(delay);
+        await sleep(delay, externalSignal);
 
-        const nextRequest = buildRetryRequest(request, method, this._retryConfig, retryCtx);
+        const nextRequest = buildRetryRequest(request, method, effectiveRetryConfig, retryCtx);
 
         return this._fetchAndParse(
           nextRequest, responseType, retries - 1, timeout,
-          externalSignal, attempt + 1, startTime, retryCtx
+          externalSignal, attempt + 1, startTime, retryCtx, callRetryConfig
         );
       }
 
@@ -394,7 +401,11 @@ class FetchEnh {
       timeout = this.defaultTimeout,
       retries = this.defaultRetries,
       signal,
+      retry: perCallRetry,
     } = options;
+    const callRetryConfig: RetryConfig | undefined = perCallRetry
+      ? { ...this._retryConfig, ...perCallRetry }
+      : undefined;
 
     const request = buildRequest({
       baseURL: this.baseURL,
@@ -407,9 +418,13 @@ class FetchEnh {
       defaultHeaders: this.defaultHeaders,
     });
 
-    // ── Request deduplication ──────────────────────────────────────────────
+    // ── Request deduplication ─────────────────────────────────────────────────────────
     const methodUpper = method.toUpperCase();
     const bodyKey = DeduplicationCache.serializeBodyForKey(body);
+    // NOTE: The dedup key is computed from the pre-interceptor Request.
+    // Interceptors that add unique headers or rewrite the URL inside
+    // _fetchAndParse are not reflected here; two semantically different
+    // requests may be coalesced. Disable dedup if interceptors make requests unique.
     const dedupeKey = this._dedupeCache.computeKey(
       methodUpper, request.url, bodyKey, this._dedupeKey
     );
@@ -422,6 +437,12 @@ class FetchEnh {
     }
 
     const bodyReplayable = isReplayableBody(body);
+    if (!bodyReplayable && retries > 0) {
+      console.warn(
+        `[FetchEnh] Non-replayable body (ReadableStream) detected with retries=${retries}. ` +
+        'Retries will be skipped for this request. Provide a `bodyFactory` option to enable retries.'
+      );
+    }
     const rawBody = preSerializeBody(body);
 
     const promise = this._fetchAndParse(
@@ -437,7 +458,8 @@ class FetchEnh {
         bodyFactory,
         bodyReplayable,
         rawBody,
-      }
+      },
+      callRetryConfig
     ) as Promise<T>;
 
     if (shouldDedupe) {
@@ -492,10 +514,11 @@ class FetchEnh {
         timeout: perCallOptions?.timeout ?? this.defaultTimeout,
         retries: perCallOptions?.retries ?? this.defaultRetries,
         signal: perCallOptions?.signal,
+        retry: perCallOptions?.retry,
       },
     };
 
-    // ── Page-based pagination ────────────────────────────────────────────
+    // ── Page-based pagination ──────────────────────────────────────────
     if (page && pageSize) {
       return paginate<any>({
         ...baseRequestOptions,
@@ -530,11 +553,105 @@ class FetchEnh {
       }) as Promise<T>;
     }
 
-    // ── Simple GET ───────────────────────────────────────────────────────
+    // ── Simple GET ───────────────────────────────────────────
     return this._request<T>({
       ...baseRequestOptions,
       query: originalQuery,
     });
+  }
+
+  /**
+   * Async generator variant of {@link get}.
+   *
+   * Instead of buffering every page into a single array, `getIter` yields one
+   * page of results at a time so the caller can process data incrementally
+   * without holding the entire result set in memory:
+   *
+   * ```ts
+   * for await (const page of api.getIter<User>({ endpoint: '/users', page: 1, pageSize: 50 })) {
+   *   await saveToDatabase(page); // only one page live at a time
+   * }
+   * ```
+   *
+   * Supports the same page-based and cursor-based options as {@link get}.
+   * For a plain (non-paginated) `GET`, yields a single one-element array
+   * containing the result.
+   */
+  async *getIter<T = any>(options: GetOptions): AsyncGenerator<T[]> {
+    const {
+      endpoint,
+      query: originalQuery = {},
+      headers = {},
+      responseType = 'json',
+      page,
+      pageSize,
+      limit,
+      maxPages,
+      extractor,
+      options: perCallOptions,
+    } = options;
+
+    const baseRequestOptions = {
+      endpoint,
+      method: 'GET',
+      headers,
+      responseType,
+      options: {
+        timeout: perCallOptions?.timeout ?? this.defaultTimeout,
+        retries: perCallOptions?.retries ?? this.defaultRetries,
+        signal: perCallOptions?.signal,
+        retry: perCallOptions?.retry,
+      },
+    };
+
+    // ── Page-based pagination ──────────────────────────────────────────
+    if (page && pageSize) {
+      yield* paginateIter<T>({
+        ...baseRequestOptions,
+        query: originalQuery,
+        page,
+        pageSize,
+        limit,
+        maxPages,
+        extractor,
+        responseType,
+      }, (params) => this._request(params));
+      return;
+    }
+
+    // ── Cursor-based pagination ──────────────────────────────────────────
+    if (options.cursor !== undefined || options.getNextCursor || options.useLinkHeader) {
+      yield* paginateCursorIter<T>({
+        endpoint,
+        headers,
+        query: originalQuery,
+        responseType,
+        limit,
+        maxPages,
+        cursor: options.cursor ?? null,
+        cursorParamName: options.cursorParamName ?? 'cursor',
+        getNextCursor: options.getNextCursor,
+        useLinkHeader: options.useLinkHeader,
+        extractor,
+        options: perCallOptions,
+      }, (params) => this._request(params), {
+        defaultTimeout: this.defaultTimeout,
+        defaultRetries: this.defaultRetries,
+      });
+      return;
+    }
+
+    // ── Simple GET ───────────────────────────────────────────
+    const result = await this._request<T>({
+      ...baseRequestOptions,
+      query: originalQuery,
+    });
+    // Yield the result page-style so the API is consistent regardless of mode
+    if (Array.isArray(result)) {
+      yield result;
+    } else {
+      yield [result];
+    }
   }
 
   /**
@@ -688,7 +805,7 @@ class FetchEnh {
       this._baseURL = v.endsWith('/') ? v.slice(0, -1) : v;
     }
     if ('defaultHeaders' in config && config.defaultHeaders !== undefined) {
-      this._defaultHeaders = config.defaultHeaders;
+      this._defaultHeaders = { ...this._defaultHeaders, ...config.defaultHeaders };
     }
     if ('defaultTimeout' in config && config.defaultTimeout !== undefined) {
       this._defaultTimeout = config.defaultTimeout;
@@ -752,6 +869,19 @@ class FetchEnh {
 
   useAuthStrategy(strategy: AuthStrategy): void {
     this._auth.useAuthStrategy(strategy);
+  }
+
+  /** Removes all registered auth strategies from this instance. */
+  clearAuthStrategies(): void {
+    this._auth.clearAuthStrategies();
+  }
+
+  /**
+   * Removes a specific auth strategy by reference.
+   * Has no effect if the strategy is not currently registered.
+   */
+  removeAuthStrategy(strategy: AuthStrategy): void {
+    this._auth.removeAuthStrategy(strategy);
   }
 }
 

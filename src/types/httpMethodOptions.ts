@@ -1,5 +1,5 @@
 import type { RequestOptions } from './requestOptions';
-import type { QueryValue, ResponseType } from './requestParameters';
+import type { QueryValue, ResponseType, BodyType } from './requestParameters';
 
 export interface HeadOptions {
   endpoint: string;
@@ -40,38 +40,25 @@ export interface GetOptions {
   options?: RequestOptions;
 }
 
-export interface PostOptions {
+/**
+ * Shared base for mutating HTTP methods (POST, PUT, PATCH).
+ * Consolidates the common fields so divergence between the three interfaces
+ * cannot occur silently.
+ */
+export interface MutationOptions {
   endpoint: string;
-  body: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  body: BodyType;
   headers?: Record<string, string>;
   responseType?: ResponseType;
   options?: RequestOptions;
-  bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  bodyFactory?: () => BodyType;
   /** Optional query parameters appended to the URL alongside the request body. */
   query?: Record<string, QueryValue>;
 }
 
-export interface PutOptions {
-  endpoint: string;
-  body: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
-  headers?: Record<string, string>;
-  responseType?: ResponseType;
-  options?: RequestOptions;
-  bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
-  /** Optional query parameters appended to the URL alongside the request body. */
-  query?: Record<string, QueryValue>;
-}
-
-export interface PatchOptions {
-  endpoint: string;
-  body: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
-  headers?: Record<string, string>;
-  responseType?: ResponseType;
-  options?: RequestOptions;
-  bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
-  /** Optional query parameters appended to the URL alongside the request body. */
-  query?: Record<string, QueryValue>;
-}
+export interface PostOptions extends MutationOptions {}
+export interface PutOptions extends MutationOptions {}
+export interface PatchOptions extends MutationOptions {}
 
 export interface DeleteOptions {
   endpoint: string;
@@ -79,7 +66,7 @@ export interface DeleteOptions {
   responseType?: ResponseType;
   options?: RequestOptions;
   /** Optional request body (e.g. for batch-delete APIs that accept a body). */
-  body?: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  body?: BodyType;
   /** Optional query parameters appended to the URL. */
   query?: Record<string, QueryValue>;
 }
@@ -87,10 +74,10 @@ export interface DeleteOptions {
 export interface RawOptions {
   endpoint: string;
   method?: string;
-  body?: object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  body?: BodyType;
   headers?: Record<string, string>;
   query?: Record<string, QueryValue>;
-  bodyFactory?: () => object | string | FormData | Blob | ArrayBuffer | URLSearchParams;
+  bodyFactory?: () => BodyType;
   /** When `true`, request interceptors, auth strategies, and response interceptors are applied before/after the fetch. Defaults to `false`. */
   applyMiddleware?: boolean;
 }
