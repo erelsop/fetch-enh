@@ -153,7 +153,7 @@ describe('Generic TypeScript Support', () => {
     expect(response.message).toBe('User deleted');
   });
 
-  test('HEAD with generic type defaults to Response', async () => {
+  test('HEAD returns Response directly', async () => {
     const api = new FetchEnh({ baseURL: 'https://api.test' });
     
     fetchMock.mockResponseOnce('', { status: 200 });

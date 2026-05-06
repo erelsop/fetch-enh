@@ -9,7 +9,7 @@ test('head returns Response', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   fetchMock.mockResponseOnce('', { status: 204 });
   const res = await api.head({ endpoint: '/head' });
-  expect((res as Response).status).toBe(204);
+  expect(res.status).toBe(204);
 });
 
 test('auto returns binary as ArrayBuffer for octet-stream', async () => {

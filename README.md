@@ -51,12 +51,14 @@ const created = await api.post({ endpoint: '/users', body: { name: 'Jane' } });
 
 ## Configuration (constructor)
 
+All fields are optional — `new FetchEnh()` (no arguments) is valid and uses sensible defaults.
+
 ```ts
 new FetchEnh({
   baseURL?: string,
   defaultHeaders?: Record<string,string>,
-  defaultTimeout?: number,
-  defaultRetries?: number,
+  defaultTimeout?: number,          // ms; 0 = no timeout
+  defaultRetries?: number,          // default 3
   queryStyle?: { array?: 'brackets'|'repeat'|'comma'; object?: 'brackets'|'dot' },
   dedupe?: boolean,
   dedupeKey?: (p:{method:string;url:string;body?:any}) => string,
@@ -69,8 +71,8 @@ new FetchEnh({
 
 ## Methods (summary)
 
-- get/post/put/patch/delete({ endpoint, headers?, query?, body?, responseType?, options? })
-- head({ endpoint, headers?, query? }) → Promise<Response>
+- `get/post/put/patch/delete({ endpoint, headers?, query?, body?, responseType?, options? })`
+- `head({ endpoint, headers?, query? })` → `Promise<Response>` (always returns the raw Response; HEAD has no body)
 - raw({ endpoint, method?, headers?, body?, query?, applyMiddleware? }) → Promise<Response>
   - By default, `raw()` calls `fetch()` directly — no interceptors, no auth, no timeout, no retries.
   - Pass `applyMiddleware: true` to apply request interceptors, auth strategies, and response interceptors while still skipping timeout and retry scaffolding.
@@ -98,6 +100,22 @@ api.setRetryBehavior(
 import { BearerTokenAuth, MemoryTokenStore } from 'fetch-enh';
 const api = new FetchEnh({ baseURL: '...' });
 api.useAuthStrategy(new BearerTokenAuth(new MemoryTokenStore('token'), async () => 'refreshed-token'));
+```
+
+### MemoryTokenStore TTL
+
+`MemoryTokenStore` supports optional time-to-live so you don't need to track expiry yourself:
+
+```ts
+const store = new MemoryTokenStore();
+// token auto-expires after expires_in seconds
+store.setTokenWithExpiry(json.access_token, json.expires_in * 1000);
+
+// Plain setToken() clears any pending TTL:
+store.setToken('new-token');          // no expiry
+
+// Snapshot for debugging:
+const { token, expiresAtMs } = store.getAll();
 ```
 
 ## Interceptors
@@ -141,7 +159,8 @@ await api.get({
   extractor: (resp) => resp.items,
   maxPages: 50,   // optional; defaults to 100
 });
-// Or useLinkHeader: true to parse Link headers (server should expose ?cursor=...)
+// Or useLinkHeader: true to parse Link headers — both relative and absolute URLs are handled:
+// e.g. Link: </items?cursor=tok>; rel="next"  OR  Link: <https://api.example.com/items?cursor=tok>; rel="next"
 ```
 
 ## Query parameters

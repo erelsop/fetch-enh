@@ -2,42 +2,42 @@ import type { RequestOptions } from './requestOptions';
 import type { QueryValue, ResponseType, BodyType } from './requestParameters';
 
 export interface HeadOptions {
-  endpoint: string;
-  headers?: Record<string, string>;
-  query?: Record<string, QueryValue>;
+  readonly endpoint: string;
+  readonly headers?: Record<string, string>;
+  readonly query?: Record<string, QueryValue>;
 }
 
 export interface PaginateOptions {
-  endpoint: string;
-  headers: Record<string, string>;
-  query: Record<string, QueryValue>;
-  responseType: ResponseType;
-  page: number;
-  pageSize: number;
-  limit?: number;
-  maxPages?: number;
-  method?: string;
-  options?: RequestOptions;
-  extractor?: (pageData: unknown) => unknown[];
+  readonly endpoint: string;
+  readonly headers: Record<string, string>;
+  readonly query: Record<string, QueryValue>;
+  readonly responseType: ResponseType;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly limit?: number;
+  readonly maxPages?: number;
+  readonly method?: string;
+  readonly options?: RequestOptions;
+  readonly extractor?: (pageData: unknown) => unknown[];
 }
 
 export interface GetOptions {
-  endpoint: string;
-  query?: Record<string, QueryValue>;
-  headers?: Record<string, string>;
-  responseType?: ResponseType;
+  readonly endpoint: string;
+  readonly query?: Record<string, QueryValue>;
+  readonly headers?: Record<string, string>;
+  readonly responseType?: ResponseType;
   // Page-based pagination
-  page?: number;
-  pageSize?: number;
-  limit?: number;
-  extractor?: (pageData: unknown) => unknown[];
-  maxPages?: number;
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly limit?: number;
+  readonly extractor?: (pageData: unknown) => unknown[];
+  readonly maxPages?: number;
   // Cursor-based pagination
-  cursor?: string | null;
-  cursorParamName?: string; // default 'cursor'
-  getNextCursor?: (response: unknown, headers: Headers) => string | null;
-  useLinkHeader?: boolean; // parse Link: rel="next"; extract next cursor param
-  options?: RequestOptions;
+  readonly cursor?: string | null;
+  readonly cursorParamName?: string; // default 'cursor'
+  readonly getNextCursor?: (response: unknown, headers: Headers) => string | null;
+  readonly useLinkHeader?: boolean; // parse Link: rel="next"; extract next cursor param
+  readonly options?: RequestOptions;
 }
 
 /**
@@ -46,14 +46,14 @@ export interface GetOptions {
  * cannot occur silently.
  */
 export interface MutationOptions {
-  endpoint: string;
-  body: BodyType;
-  headers?: Record<string, string>;
-  responseType?: ResponseType;
-  options?: RequestOptions;
-  bodyFactory?: () => BodyType;
+  readonly endpoint: string;
+  readonly body: BodyType;
+  readonly headers?: Record<string, string>;
+  readonly responseType?: ResponseType;
+  readonly options?: RequestOptions;
+  readonly bodyFactory?: () => BodyType;
   /** Optional query parameters appended to the URL alongside the request body. */
-  query?: Record<string, QueryValue>;
+  readonly query?: Record<string, QueryValue>;
 }
 
 export interface PostOptions extends MutationOptions {}
@@ -61,23 +61,23 @@ export interface PutOptions extends MutationOptions {}
 export interface PatchOptions extends MutationOptions {}
 
 export interface DeleteOptions {
-  endpoint: string;
-  headers?: Record<string, string>;
-  responseType?: ResponseType;
-  options?: RequestOptions;
+  readonly endpoint: string;
+  readonly headers?: Record<string, string>;
+  readonly responseType?: ResponseType;
+  readonly options?: RequestOptions;
   /** Optional request body (e.g. for batch-delete APIs that accept a body). */
-  body?: BodyType;
+  readonly body?: BodyType;
   /** Optional query parameters appended to the URL. */
-  query?: Record<string, QueryValue>;
+  readonly query?: Record<string, QueryValue>;
 }
 
 export interface RawOptions {
-  endpoint: string;
-  method?: string;
-  body?: BodyType;
-  headers?: Record<string, string>;
-  query?: Record<string, QueryValue>;
-  bodyFactory?: () => BodyType;
+  readonly endpoint: string;
+  readonly method?: string;
+  readonly body?: BodyType;
+  readonly headers?: Record<string, string>;
+  readonly query?: Record<string, QueryValue>;
+  readonly bodyFactory?: () => BodyType;
   /** When `true`, request interceptors, auth strategies, and response interceptors are applied before/after the fetch. Defaults to `false`. */
-  applyMiddleware?: boolean;
+  readonly applyMiddleware?: boolean;
 }

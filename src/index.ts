@@ -100,7 +100,7 @@ class FetchEnh {
     dedupeKey,
     onRetry,
     onComplete,
-  }: FetchEnhConfig) {
+  }: FetchEnhConfig = {}) {
     this._baseURL = baseURL.endsWith('/')
       ? baseURL.slice(0, -1)
       : baseURL;
@@ -473,9 +473,9 @@ class FetchEnh {
   /**
    * Sends a HEAD request to the specified endpoint.
    */
-  async head<T = Response>(options: HeadOptions): Promise<T> {
+  async head(options: HeadOptions): Promise<Response> {
     const { endpoint, headers = {}, query = {} } = options;
-    return this._request({
+    return this._request<Response>({
       endpoint,
       method: 'HEAD',
       headers,

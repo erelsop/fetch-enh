@@ -20,12 +20,12 @@ export type ResponseType = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData'
 export type BodyType = FormData | Blob | ArrayBuffer | URLSearchParams | string | object;
 
 export interface RequestParameters {
-  endpoint: string;
-  method?: string;
-  body?: BodyType;
-  headers?: Record<string, string>;
-  query?: Record<string, QueryValue>;
-  responseType?: ResponseType;
-  options?: RequestOptions;
-  bodyFactory?: () => BodyType; // for retries with non-replayable bodies
+  readonly endpoint: string;
+  readonly method?: string;
+  readonly body?: BodyType;
+  readonly headers?: Record<string, string>;
+  readonly query?: Record<string, QueryValue>;
+  readonly responseType?: ResponseType;
+  readonly options?: RequestOptions;
+  readonly bodyFactory?: () => BodyType; // for retries with non-replayable bodies
 }

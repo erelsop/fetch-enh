@@ -16,11 +16,11 @@ export interface BackoffStrategy {
 }
 
 export interface RetryConfig {
-  idempotentOnly?: boolean; // default true
-  maxElapsedMs?: number; // total retry window cap
-  respectRetryAfter?: boolean; // consider Retry-After header (429/503)
-  allowUnsafeRetries?: boolean; // allow retries for POST/DELETE when true or when idempotencyKeyFactory present
-  idempotencyKeyFactory?: () => string; // generate Idempotency-Key header on retry
+  readonly idempotentOnly?: boolean; // default true
+  readonly maxElapsedMs?: number; // total retry window cap
+  readonly respectRetryAfter?: boolean; // consider Retry-After header (429/503)
+  readonly allowUnsafeRetries?: boolean; // allow retries for POST/DELETE when true or when idempotencyKeyFactory present
+  readonly idempotencyKeyFactory?: () => string; // generate Idempotency-Key header on retry
 }
 
 

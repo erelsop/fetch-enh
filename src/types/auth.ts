@@ -4,9 +4,9 @@ export interface TokenStore {
 }
 
 export interface AuthStrategy {
-  priority?: number;
-  onRequest?: (request: Request) => Promise<Request | void | false> | Request | void | false;
-  onAuthError?: (
+  readonly priority?: number;
+  readonly onRequest?: (request: Request) => Promise<Request | void | false> | Request | void | false;
+  readonly onAuthError?: (
     request: Request,
     response: Response,
     retry: (newRequest: Request) => Promise<Response>

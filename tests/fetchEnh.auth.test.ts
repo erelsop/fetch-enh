@@ -34,6 +34,52 @@ describe('Token Stores', () => {
     });
   });
 
+  describe('MemoryTokenStore TTL', () => {
+    test('token remains valid before TTL expires', () => {
+      const store = new MemoryTokenStore();
+      store.setTokenWithExpiry('tok', 10_000); // 10s
+      expect(store.getToken()).toBe('tok');
+    });
+
+    test('token returns null after TTL expires', async () => {
+      const store = new MemoryTokenStore();
+      store.setTokenWithExpiry('tok', 30); // 30ms TTL
+      expect(store.getToken()).toBe('tok');
+      await new Promise<void>(r => setTimeout(r, 50));
+      expect(store.getToken()).toBeNull();
+    });
+
+    test('setToken clears TTL', () => {
+      const store = new MemoryTokenStore();
+      store.setTokenWithExpiry('tok', 10_000);
+      store.setToken('new');
+      expect(store.getToken()).toBe('new');
+      expect(store.getAll().expiresAtMs).toBeNull();
+    });
+
+    test('setTokenWithExpiry with null token clears store', () => {
+      const store = new MemoryTokenStore('initial');
+      store.setTokenWithExpiry(null);
+      expect(store.getToken()).toBeNull();
+      expect(store.getAll().expiresAtMs).toBeNull();
+    });
+
+    test('getAll returns token and approximate expiresAtMs', () => {
+      const store = new MemoryTokenStore();
+      const before = Date.now();
+      store.setTokenWithExpiry('tok', 5000);
+      const { token, expiresAtMs } = store.getAll();
+      expect(token).toBe('tok');
+      expect(expiresAtMs).toBeGreaterThanOrEqual(before + 5000);
+      expect(expiresAtMs).toBeLessThan(before + 6000);
+    });
+
+    test('no TTL when setToken is called', () => {
+      const store = new MemoryTokenStore('initial');
+      expect(store.getAll().expiresAtMs).toBeNull();
+    });
+  });
+
   describe('LocalStorageTokenStore', () => {
     test('stores and retrieves token from localStorage', () => {
       const store = new LocalStorageTokenStore('test_key');

@@ -11,7 +11,8 @@ export function parseLinkHeaderForNextCursor(headers: Headers, cursorParamName: 
     const m = section.match(/<([^>]+)>;\s*rel="([^"]+)"/i);
     if (m && m[2] === 'next') {
       try {
-        const url = new URL(m[1]);
+        // Use a placeholder base so both absolute and relative Link URLs work.
+        const url = new URL(m[1], 'https://placeholder.invalid');
         const cur = url.searchParams.get(cursorParamName) || url.searchParams.get('page');
         return cur || null;
       } catch {
@@ -51,6 +52,7 @@ export async function* paginateIter<T = any>(
 ): AsyncGenerator<T[]> {
   const {
     endpoint,
+    method,
     headers,
     query,
     responseType,
@@ -59,6 +61,7 @@ export async function* paginateIter<T = any>(
     limit,
     maxPages = 100,
     extractor,
+    options: callOptions,
   } = options;
 
   let currentPage = page;
@@ -73,8 +76,12 @@ export async function* paginateIter<T = any>(
     };
 
     const response = await requestFn({
-      ...options,
+      endpoint,
+      method,
+      headers,
       query: currentQuery,
+      responseType,
+      options: callOptions,
     });
 
     if (responseType === 'json') {

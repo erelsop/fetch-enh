@@ -378,3 +378,97 @@ describe('getIter yields pages without full buffering', () => {
     expect(all[3]).toEqual({ id: 4 });
   });
 });
+
+describe('getIter cursor-based pagination branch', () => {
+  test('cursor with getNextCursor: yields pages until cursor is null', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+
+    // paginateCursorIter fetches with responseType:'response' when getNextCursor is set,
+    // then calls res.clone().json() internally to extract items and the next cursor.
+    fetchMock
+      .mockResponseOnce(
+        JSON.stringify({ items: [{ id: 1 }, { id: 2 }], nextCursor: 'page2' }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+      .mockResponseOnce(
+        JSON.stringify({ items: [{ id: 3 }], nextCursor: null }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+
+    const pages: any[][] = [];
+    for await (const page of api.getIter<{ id: number }>({
+      endpoint: '/items',
+      cursor: null,
+      cursorParamName: 'after',
+      getNextCursor: (resp: any) => resp.nextCursor ?? null,
+      extractor: (resp: any) => resp.items,
+    })) {
+      pages.push(page);
+    }
+
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(pages[1]).toEqual([{ id: 3 }]);
+  });
+
+  test('cursor with useLinkHeader: parses Link header for next cursor', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+
+    fetchMock
+      .mockResponseOnce(
+        JSON.stringify([{ id: 10 }, { id: 11 }]),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            link: '</api/items?cursor=tok123>; rel="next"',
+          },
+        }
+      )
+      .mockResponseOnce(
+        JSON.stringify([{ id: 12 }]),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+
+    const pages: any[][] = [];
+    for await (const page of api.getIter<{ id: number }>({
+      endpoint: '/api/items',
+      useLinkHeader: true,
+      cursorParamName: 'cursor',
+    })) {
+      pages.push(page);
+    }
+
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toEqual([{ id: 10 }, { id: 11 }]);
+    expect(pages[1]).toEqual([{ id: 12 }]);
+    // Second request should include cursor=tok123 in URL
+    const secondUrl = fetchMock.mock.calls[1][0] as string;
+    expect(secondUrl).toContain('cursor=tok123');
+  });
+
+  test('cursor with limit stops early', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+
+    fetchMock
+      .mockResponseOnce(
+        JSON.stringify({ items: [{ id: 1 }, { id: 2 }, { id: 3 }], next: 'page2' }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+
+    const pages: any[][] = [];
+    for await (const page of api.getIter<{ id: number }>({
+      endpoint: '/items',
+      cursor: null,
+      getNextCursor: (resp: any) => resp.next ?? null,
+      extractor: (resp: any) => resp.items,
+      limit: 2,
+    })) {
+      pages.push(page);
+    }
+
+    const allItems = pages.flat();
+    expect(allItems).toHaveLength(2);
+    expect(allItems).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+});

@@ -5,6 +5,14 @@ beforeEach(() => {
   fetchMock.resetMocks();
 });
 
+test('FetchEnh() can be constructed with no arguments', () => {
+  expect(() => new FetchEnh()).not.toThrow();
+  const api = new FetchEnh();
+  expect(api.baseURL).toBe('');
+  expect(api.defaultTimeout).toBe(0);
+  expect(api.defaultRetries).toBe(3);
+});
+
 test('setConfig normalizes trailing slash in baseURL', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   api.setConfig({ baseURL: 'https://api.test/' });
@@ -436,4 +444,58 @@ test('default cursor-based pagination cap is 100 (not 200)', async () => {
   } as any);
   // Previously capped at 201; new default is 100.
   expect(fetchMock).toHaveBeenCalledTimes(100);
+});
+
+describe('clearRequestInterceptors and clearResponseInterceptors', () => {
+  test('clearRequestInterceptors() prevents subsequent request interceptors from firing', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test' });
+    const handler = jest.fn().mockImplementation((req: Request) => req);
+    api.addRequestInterceptor({ handler });
+
+    fetchMock.mockResponseOnce(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    await api.get({ endpoint: '/before' });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    api.clearRequestInterceptors();
+    fetchMock.mockResponseOnce(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    await api.get({ endpoint: '/after' });
+    expect(handler).toHaveBeenCalledTimes(1); // still 1 — not called again
+  });
+
+  test('clearResponseInterceptors() prevents subsequent response interceptors from firing', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test' });
+    const handler = jest.fn().mockImplementation((res: Response) => res);
+    api.addResponseInterceptor({ handler });
+
+    fetchMock.mockResponseOnce(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    await api.get({ endpoint: '/before' });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    api.clearResponseInterceptors();
+    fetchMock.mockResponseOnce(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    await api.get({ endpoint: '/after' });
+    expect(handler).toHaveBeenCalledTimes(1); // still 1 — not called again
+  });
+
+  test('clearRequestInterceptors() is a no-op when no interceptors are registered', () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test' });
+    expect(() => api.clearRequestInterceptors()).not.toThrow();
+  });
+
+  test('clearResponseInterceptors() is a no-op when no interceptors are registered', () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test' });
+    expect(() => api.clearResponseInterceptors()).not.toThrow();
+  });
 });
