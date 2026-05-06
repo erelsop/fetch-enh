@@ -2,27 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0-rc.1] - 2025-10-28
+## [Unreleased]
 
-### Added
-- OAuth2 authentication strategies:
-  - OAuth2ClientCredentialsAuth for Node (client credentials grant)
-  - OAuth2PKCEAuth for browser (authorization code + PKCE via user-provided functions)
-- Hooks: onRetry and onComplete metrics
-- Request deduping option
-- Cursor pagination via Link headers
-- Query serialization styles (arrays: brackets/repeat/comma; objects: brackets/dot)
-- Expanded error model (code, status, method, url, attempts, elapsedMs, requestId; toJSON)
-
-### Changed
-- Interceptor composition (onion model) and clarified behavior
-- Retry + body replayability with bodyFactory and idempotency key support
-
-### Removed
-- CI references; upload progress is explicitly deferred
+_Changes will be recorded here as `1.0.0` is finalized._
 
 ---
 
-[1.0.0-rc.1]: https://github.com/erelsop/FetchEnh/releases/tag/v1.0.0-rc.1
+[Unreleased]: https://github.com/erelsop/FetchEnh/compare/HEAD...HEAD

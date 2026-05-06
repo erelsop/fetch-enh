@@ -167,3 +167,42 @@ test('FetchError.status is 404 for GET /not-found', async () => {
   expect(caughtError).toBeInstanceOf(FetchError);
   expect(caughtError!.status).toBe(404);
 });
+
+// P-5 regression tests: raw() with a body must work on real (undici) fetch.
+// Before the P-1 fix these threw "RequestInit: duplex option is required when
+// sending a body" on Node ≥18 because request.body (a ReadableStream) was
+// being extracted into the safeFetch init object.
+test('raw() with body POSTs correctly against real fetch', async () => {
+  const api = new FetchEnh({ baseURL, defaultRetries: 0 });
+  const res = await api.raw({
+    endpoint: '/echo',
+    method: 'POST',
+    body: { hello: 'world' },
+  });
+  expect(res.status).toBe(200);
+  const data = await res.json() as { method: string; contentType: string; body: unknown };
+  expect(data.method).toBe('POST');
+  expect(data.contentType).toContain('application/json');
+  expect(data.body).toEqual({ hello: 'world' });
+});
+
+test('raw({ applyMiddleware: true }) with body POSTs correctly through interceptors', async () => {
+  const api = new FetchEnh({ baseURL, defaultRetries: 0 });
+  api.addRequestInterceptor({
+    handler: (req) => {
+      const h = new Headers(req.headers);
+      h.set('x-via-interceptor', 'yes');
+      return new Request(req, { headers: h });
+    },
+  });
+  const res = await api.raw({
+    endpoint: '/echo',
+    method: 'POST',
+    body: { a: 1 },
+    applyMiddleware: true,
+  });
+  expect(res.status).toBe(200);
+  const data = await res.json() as { method: string; contentType: string; body: unknown };
+  expect(data.method).toBe('POST');
+  expect(data.body).toEqual({ a: 1 });
+});

@@ -8,11 +8,21 @@ on:
 
 jobs:
   test:
-    name: "Node ${{ matrix.node }} — test + build"
+    name: "Node ${{ matrix.node }} on ${{ matrix.os }}"
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
-        node: [18, 20, 22]
-    runs-on: ubuntu-latest
+        # Full Node matrix on Linux; Node 22 spot-check on Windows and macOS.
+        node: [20, 22]
+        os: [ubuntu-latest]
+        include:
+          - node: 22
+            os: windows-latest
+          - node: 22
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,15 +42,61 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Smoke-test CJS artifact
-        run: node -e "const m = require('./dist/index.js'); console.log('CJS ok, default export:', typeof m.default);"
+      - name: Check coverage thresholds
+        run: npm run test:coverage
 
-      - name: Smoke-test ESM artifact
+      - name: Smoke-test CJS artifact (behaviour)
+        run: |
+          node -e "
+          const http = require('http');
+          const FetchEnh = require('./dist/index.js').default;
+          (async () => {
+            const server = http.createServer((req, res) => {
+              const chunks = [];
+              req.on('data', c => chunks.push(c));
+              req.on('end', () => {
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ method: req.method, body: Buffer.concat(chunks).toString() }));
+              });
+            });
+            await new Promise(r => server.listen(0, '127.0.0.1', r));
+            const port = server.address().port;
+            const api = new FetchEnh({ baseURL: 'http://127.0.0.1:' + port, defaultRetries: 0 });
+            const r1 = await api.get({ endpoint: '/x' });
+            console.log('CJS GET ok:', JSON.stringify(r1));
+            const r2 = await api.post({ endpoint: '/x', body: { hi: 'there' } });
+            console.log('CJS POST ok:', JSON.stringify(r2));
+            const r3 = await api.raw({ endpoint: '/x', method: 'POST', body: { a: 1 } });
+            console.log('CJS RAW POST ok: status', r3.status);
+            server.close();
+            console.log('CJS behaviour smoke-test passed');
+          })().catch(err => { console.error('CJS smoke-test failed:', err.message); process.exit(1); });
+          "
+
+      - name: Smoke-test ESM artifact (behaviour)
         run: |
           node --input-type=module <<'EOF'
-          import { createRequire } from 'module';
-          import { pathToFileURL } from 'url';
+          import http from 'node:http';
+          import { pathToFileURL } from 'node:url';
           const esmEntry = new URL('dist/esm/index.js', pathToFileURL(process.cwd() + '/'));
-          const m = await import(esmEntry.href);
-          console.log('ESM ok, default export:', typeof m.default);
+          const { default: FetchEnh } = await import(esmEntry.href);
+          const server = http.createServer((req, res) => {
+            const chunks = [];
+            req.on('data', c => chunks.push(c));
+            req.on('end', () => {
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ method: req.method, body: Buffer.concat(chunks).toString() }));
+            });
+          });
+          await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+          const port = server.address().port;
+          const api = new FetchEnh({ baseURL: 'http://127.0.0.1:' + port, defaultRetries: 0 });
+          const r1 = await api.get({ endpoint: '/x' });
+          console.log('ESM GET ok:', JSON.stringify(r1));
+          const r2 = await api.post({ endpoint: '/x', body: { hi: 'there' } });
+          console.log('ESM POST ok:', JSON.stringify(r2));
+          const r3 = await api.raw({ endpoint: '/x', method: 'POST', body: { a: 1 } });
+          console.log('ESM RAW POST ok: status', r3.status);
+          server.close();
+          console.log('ESM behaviour smoke-test passed');
           EOF

@@ -46,38 +46,26 @@ export class InterceptorPipeline {
   }
 
   async applyRequestInterceptors(request: Request): Promise<Request> {
-    const apply = async (index: number, req: Request): Promise<Request> => {
-      if (index >= this._requestInterceptors.length) return req;
-      const interceptor = this._requestInterceptors[index];
-      const downstream = await apply(index + 1, req);
-      try {
-        const result = await interceptor.handler(downstream, async () => { /* no-op for back-compat */ });
-        if (result === false) {
-          throw new InterceptorAbortError();
-        }
-        return result instanceof Request ? result : downstream;
-      } catch (error) {
-        throw error;
-      }
-    };
-    return apply(0, request);
+    // Iterate forward through the priority-sorted array so that lower-priority
+    // numbers (sorted to the front) execute first — matching the documented
+    // contract: "lower numbers run first on the way in".
+    let req = request;
+    for (const interceptor of this._requestInterceptors) {
+      const result = await interceptor.handler(req, async () => { /* no-op for back-compat */ });
+      if (result === false) throw new InterceptorAbortError();
+      if (result instanceof Request) req = result;
+    }
+    return req;
   }
 
   async applyResponseInterceptors(response: Response): Promise<Response> {
-    const apply = async (index: number, res: Response): Promise<Response> => {
-      if (index >= this._responseInterceptors.length) return res;
-      const interceptor = this._responseInterceptors[index];
-      const downstream = await apply(index + 1, res);
-      try {
-        const result = await interceptor.handler(downstream, async () => { /* no-op for back-compat */ });
-        if (result === false) {
-          throw new InterceptorAbortError('Response interceptor halted.');
-        }
-        return result instanceof Response ? result : downstream;
-      } catch (error) {
-        throw error;
-      }
-    };
-    return apply(0, response);
+    // Same forward-iteration contract as applyRequestInterceptors.
+    let res = response;
+    for (const interceptor of this._responseInterceptors) {
+      const result = await interceptor.handler(res, async () => { /* no-op for back-compat */ });
+      if (result === false) throw new InterceptorAbortError('Response interceptor halted.');
+      if (result instanceof Response) res = result;
+    }
+    return res;
   }
 }

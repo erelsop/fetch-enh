@@ -782,6 +782,13 @@ class FetchEnh {
       signal,
     } = options;
 
+    // Pre-serialise the body *before* constructing the Request object so that
+    // we have a non-stream BodyInit to pass to safeFetch.  Extracting
+    // request.body after the fact yields a ReadableStream, which triggers the
+    // Node ≥18 "RequestInit: duplex option is required when sending a body"
+    // error in undici-backed fetch.
+    const serializedBody = preSerializeBody(body);
+
     let request = buildRequest({
       baseURL: this.baseURL,
       endpoint,
@@ -799,7 +806,7 @@ class FetchEnh {
       const response = await safeFetch(request.url, {
         method: request.method,
         headers: request.headers,
-        body: request.body ?? undefined,
+        body: serializedBody,
         signal,
       });
       return this._applyResponseInterceptors(response);
@@ -808,7 +815,7 @@ class FetchEnh {
     return safeFetch(request.url, {
       method: request.method,
       headers: request.headers,
-      body: request.body ?? undefined,
+      body: serializedBody,
       signal,
     });
   }

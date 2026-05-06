@@ -155,7 +155,7 @@ const MAX_REDIRECTS = 20;
  * **stripped** when a redirect leads to a different origin.
  *
  * - Uses `redirect: 'manual'` on every hop.
- * - On a 3xx response, reads the `Location` header (works in Node.js 18+;
+ * - On a 3xx response, reads the `Location` header (works in Node.js 20+;
  *   returns the raw opaque response in browser environments where Location is
  *   inaccessible, leaving the caller to handle it).
  * - Follows up to {@link MAX_REDIRECTS} hops before throwing.

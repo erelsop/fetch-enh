@@ -26,40 +26,13 @@ export function parseLinkHeaderForNextCursor(headers: Headers, cursorParamName: 
 /**
  * Returns a signal that aborts when any of the provided signals abort.
  *
- * Uses the platform-native `AbortSignal.any()` when available
- * (Node.js 20+ / Chrome 116+ / Firefox 124+); falls back to a lightweight
- * proxy-controller polyfill for Node.js 18.
+ * Delegates to the platform-native `AbortSignal.any()` (Node.js ≥20,
+ * Chrome 116+, Firefox 124+).
  *
  * @internal
  */
 function composeSignals(signals: AbortSignal[]): AbortSignal {
-  // Use native implementation when available. Cast to `any` to avoid TypeScript
-  // errors when targeting type definitions that pre-date AbortSignal.any.
-  const nativeAny = (AbortSignal as any).any as
-    | ((signals: AbortSignal[]) => AbortSignal)
-    | undefined;
-  if (typeof nativeAny === 'function') {
-    return nativeAny(signals);
-  }
-
-  // Node 18 polyfill: proxy controller that aborts when the first signal fires.
-  const controller = new AbortController();
-  const alreadyAborted = signals.find(s => s.aborted);
-  if (alreadyAborted) {
-    controller.abort(alreadyAborted.reason);
-    return controller.signal;
-  }
-  const cleanupFns: (() => void)[] = [];
-  for (const signal of signals) {
-    const handler = () => {
-      // Tear down all listeners once any signal fires to avoid memory leaks.
-      cleanupFns.forEach(fn => fn());
-      controller.abort(signal.reason);
-    };
-    signal.addEventListener('abort', handler, { once: true });
-    cleanupFns.push(() => signal.removeEventListener('abort', handler));
-  }
-  return controller.signal;
+  return AbortSignal.any(signals);
 }
 
 export async function paginate<T = any>(

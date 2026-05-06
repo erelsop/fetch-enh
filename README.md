@@ -12,7 +12,7 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 - Response parsing (`auto` content-type sniffing or explicit types) with 204/205 handled as `null`
 - Pagination — page/`pageSize` and cursor / `Link` header — exposed as both buffered (`get()`) and streaming (`getIter()`) variants
 - Structured errors with `toJSON()` (`FetchError`, `RetryError`, `TimeoutError`, `UnsupportedResponseTypeError`, `InterceptorAbortError`, `AuthAbortError`)
-- TypeScript-first API with `readonly` types and bounded `QueryValue` typing; works in browsers and Node.js (≥ 18)
+- TypeScript-first API with `readonly` types and bounded `QueryValue` typing; works in browsers and Node.js (≥ 20)
 - Zero runtime dependencies
 - Dual CJS/ESM build with source maps, declaration maps, and `sideEffects: false` — tree-shakeable by modern bundlers (Vite, esbuild, Rollup, webpack 5+)
 
@@ -37,7 +37,7 @@ The package ships a dual build:
 
 Bundlers that respect the `exports` map in `package.json` (Vite, esbuild, Rollup, webpack 5+) will automatically select the correct entry point. Source maps and declaration maps ship in both builds for debuggable production stack traces, and `"sideEffects": false` lets bundlers tree-shake unused exports.
 
-**Runtime requirement:** Node.js ≥ 18 (enforced via `engines`). The library uses global `fetch`, `AbortController`, `FormData`, `Blob`, `Headers`, and `URL`.
+**Runtime requirement:** Node.js ≥ 20 (enforced via `engines`). The library uses global `fetch`, `AbortController`, `FormData`, `Blob`, `Headers`, and `URL`.
 
 ## Quick Start
 
@@ -185,16 +185,17 @@ All outbound `fetch()` calls go through a `safeFetch()` helper that performs man
 
 ## Interceptors
 
-Interceptors compose onion-style around the underlying request. `priority` controls ordering (lower numbers run first on the way in). Returning `false` halts the chain with a typed `InterceptorAbortError` (which is **not** retried).
+Interceptors execute sequentially in a forward pipeline. `priority` controls ordering — **lower numbers run first**. Returning `false` halts the chain with a typed `InterceptorAbortError` (which is **not** retried).
+
+> **`next()` note:** the `next` callback passed to each handler is a no-op kept for API compatibility. Handlers do not need to call it; the pipeline always advances to the next interceptor regardless.
 
 ```ts
-api.addRequestInterceptor({ priority: 10, handler: async (req, next) => {
+api.addRequestInterceptor({ priority: 10, handler: async (req) => {
   const h = new Headers(req.headers); h.set('X-Request-Time', Date.now().toString());
-  await next();
   return new Request(req, { headers: h });
 }});
 
-api.addResponseInterceptor({ handler: async (res, next) => { await next(); return res; }});
+api.addResponseInterceptor({ handler: async (res) => res });
 
 // Removal is by reference; clearing wipes everything:
 api.removeRequestInterceptor(myInterceptor);
@@ -328,7 +329,7 @@ await api.get({ endpoint: '/slow', options: { timeout: 5000, signal: c.signal } 
 ## Environment
 
 - **Browser:** uses native `fetch`. Some headers (e.g. `User-Agent`) are restricted by the platform. Use `OAuth2PKCEAuth` — never `OAuth2ClientCredentialsAuth`, which throws in browsers to avoid leaking the client secret.
-- **Node.js:** works with global `fetch` (Node ≥ 18). Inject `fetch` via `OAuth2ClientCredentialsAuth`'s `fetchFn` parameter if you need a custom transport.
+- **Node.js:** works with global `fetch` (Node ≥ 20). Inject `fetch` via `OAuth2ClientCredentialsAuth`'s `fetchFn` parameter if you need a custom transport.
 
 ## Contributing
 

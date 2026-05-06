@@ -32,13 +32,30 @@ function ensureJsExt(p) {
 function processFile(filePath) {
   let src = readFileSync(filePath, 'utf8');
 
-  // static:  from './foo'   or  from "../foo"
+  // Rewrite relative imports only inside actual import/export statements.
+  // Using ^…/gm (line-start anchor) prevents false positives when a source
+  // file contains a string literal that happens to look like an import path
+  // (e.g. a JSDoc example or a template literal).
+  //
+  // Pattern A — single-line: `import … from './foo'`
+  //             or           `export … from './foo'`
+  //             (the non-greedy [^\n]*? stops at the newline so multi-line
+  //              spread imports are handled by Pattern B below)
   src = src.replace(
-    /\bfrom\s+(['"])(\.{1,2}\/[^'"]+)\1/g,
-    (_, q, p) => `from ${q}${ensureJsExt(p)}${q}`,
+    /^(\s*(?:import|export)\b[^\n]*?\bfrom\s+)(['"])(\.{1,2}\/[^'"]+)\2/gm,
+    (_, pre, q, p) => `${pre}${q}${ensureJsExt(p)}${q}`,
   );
 
-  // dynamic: import('./foo')  or  import("../foo")
+  // Pattern B — closing line of a multi-line named import:
+  //   `} from './foo'`
+  src = src.replace(
+    /^(\s*\})\s+from\s+(['"])(\.{1,2}\/[^'"]+)\2/gm,
+    (_, pre, q, p) => `${pre} from ${q}${ensureJsExt(p)}${q}`,
+  );
+
+  // Dynamic import: import('./foo') — kept as a global (no line anchor needed;
+  // `import(` as a call expression in a string literal is vanishingly rare in
+  // compiled TypeScript output and would require contrived authoring to trigger).
   src = src.replace(
     /\bimport\s*\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*\)/g,
     (_, q, p) => `import(${q}${ensureJsExt(p)}${q})`,
