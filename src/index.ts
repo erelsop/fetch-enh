@@ -197,8 +197,9 @@ class FetchEnh {
       externalSignal.addEventListener('abort', abortHandler);
     }
 
-    // Apply middleware pipelines
-    request = await this._applyRequestInterceptors(request);
+    // Auth strategies run once per attempt so a token refresh that lands during
+    // a retry window takes effect immediately. Request interceptors are applied
+    // once per logical call in _request (before entering the retry loop).
     request = await this._auth.applyAuthOnRequest(request);
 
     try {
@@ -387,7 +388,7 @@ class FetchEnh {
   /**
    * Performs a fetch request with the provided options and returns parsed data.
    */
-  async _request<T = any>({
+  private async _request<T = any>({
     endpoint,
     method = 'GET',
     body,
@@ -422,9 +423,9 @@ class FetchEnh {
     const methodUpper = method.toUpperCase();
     const bodyKey = DeduplicationCache.serializeBodyForKey(body);
     // NOTE: The dedup key is computed from the pre-interceptor Request.
-    // Interceptors that add unique headers or rewrite the URL inside
-    // _fetchAndParse are not reflected here; two semantically different
-    // requests may be coalesced. Disable dedup if interceptors make requests unique.
+    // Interceptors that add unique headers or rewrite the URL are not reflected
+    // here; two semantically different requests may be coalesced if interceptors
+    // make them unique. Disable dedup or supply a custom dedupeKey in that case.
     const dedupeKey = this._dedupeCache.computeKey(
       methodUpper, request.url, bodyKey, this._dedupeKey
     );
@@ -445,22 +446,34 @@ class FetchEnh {
     }
     const rawBody = preSerializeBody(body);
 
-    const promise = this._fetchAndParse(
-      request,
-      responseType,
-      retries,
-      timeout,
-      signal,
-      1,
-      Date.now(),
-      {
-        method: methodUpper,
-        bodyFactory,
-        bodyReplayable,
-        rawBody,
-      },
-      callRetryConfig
-    ) as Promise<T>;
+    // Wrap interceptors + _fetchAndParse in a synchronously-created promise so that
+    // dedup tracking can happen before the first `await`. If we awaited interceptors
+    // inline here, a concurrent identical request could slip past the dedup check
+    // during the async gap and produce a duplicate in-flight request.
+    //
+    // Request interceptors run once per logical call (here, inside the IIFE).
+    // Auth strategies run once per attempt inside _fetchAndParse so that a token
+    // refresh during a retry window takes effect immediately.
+    const startTime = Date.now();
+    const promise = (async (): Promise<T> => {
+      const interceptedRequest = await this._applyRequestInterceptors(request);
+      return this._fetchAndParse(
+        interceptedRequest,
+        responseType,
+        retries,
+        timeout,
+        signal,
+        1,
+        startTime,
+        {
+          method: methodUpper,
+          bodyFactory,
+          bodyReplayable,
+          rawBody,
+        },
+        callRetryConfig
+      ) as Promise<T>;
+    })();
 
     if (shouldDedupe) {
       this._dedupeCache.track(dedupeKey, promise);
@@ -741,15 +754,19 @@ class FetchEnh {
    * Performs a raw fetch, bypassing all middleware by default.
    *
    * @remarks
-   * **Middleware bypass warning:** By default `raw()` calls the native `fetch()` directly.
-   * No request interceptors, response interceptors, auth strategies, timeouts, or retries
-   * are applied. Code that relies on `useAuthStrategy()` or `addRequestInterceptor()` will
-   * see those additions silently ignored on calls routed through `raw()`.
+   * **Middleware bypass warning:** By default `raw()` skips all interceptors, auth
+   * strategies, timeouts, and retries. Code that relies on `useAuthStrategy()` or
+   * `addRequestInterceptor()` will see those additions silently ignored on calls
+   * routed through `raw()`. Cross-origin redirects are still handled safely by
+   * `safeFetch` — sensitive headers (`Authorization`, `Cookie`, etc.) are stripped
+   * on cross-origin hops in both the default and `applyMiddleware: true` paths.
    *
    * Pass `{ applyMiddleware: true }` to opt back in to request interceptors, auth
    * strategies, and response interceptors — without the full timeout/retry scaffolding
    * of a normal `_request` call. This is useful when you need auth headers applied to a
    * one-shot request but do not want automatic retries.
+   *
+   * Pass `{ signal }` to provide an `AbortSignal` that cancels the underlying request.
    *
    * @param options - Raw request options.
    * @returns A native `Response` promise.
@@ -762,6 +779,7 @@ class FetchEnh {
       headers = {},
       query = {},
       applyMiddleware = false,
+      signal,
     } = options;
 
     let request = buildRequest({
@@ -778,11 +796,21 @@ class FetchEnh {
     if (applyMiddleware) {
       request = await this._applyRequestInterceptors(request);
       request = await this._auth.applyAuthOnRequest(request);
-      const response = await fetch(request);
+      const response = await safeFetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ?? undefined,
+        signal,
+      });
       return this._applyResponseInterceptors(response);
     }
 
-    return fetch(request);
+    return safeFetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body ?? undefined,
+      signal,
+    });
   }
 
   // ── Configuration ─────────────────────────────────────────────────────────
@@ -892,6 +920,8 @@ export type {
 export type {
   RequestParameters,
   BodyType,
+  JsonPrimitive,
+  JsonValue,
 } from './types/requestParameters';
 export type {
   GetOptions,

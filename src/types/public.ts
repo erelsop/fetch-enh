@@ -1,6 +1,6 @@
 export type { FetchEnhConfig } from './config';
 export type { RequestOptions } from './requestOptions';
-export type { RequestParameters, BodyType } from './requestParameters';
+export type { RequestParameters, BodyType, JsonPrimitive, JsonValue } from './requestParameters';
 export type {
   HeadOptions,
   PaginateOptions,

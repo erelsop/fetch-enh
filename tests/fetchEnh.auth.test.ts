@@ -415,6 +415,14 @@ describe('Authentication Strategies', () => {
     test('does not throw when queryName is provided', () => {
       expect(() => new ApiKeyAuth({ queryName: 'api_key', getApiKey: () => 'key' })).not.toThrow();
     });
+
+    test('throws at construction when both headerName and queryName are provided', () => {
+      expect(() => new ApiKeyAuth({
+        headerName: 'X-API-Key',
+        queryName: 'api_key',
+        getApiKey: () => 'key',
+      })).toThrow(/provide exactly one of/);
+    });
   });
 
   describe('Auth halt via AuthAbortError', () => {

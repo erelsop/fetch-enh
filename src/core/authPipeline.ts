@@ -6,7 +6,7 @@ export class AuthPipeline {
 
   useAuthStrategy(strategy: AuthStrategy): void {
     this._authStrategies.push(strategy);
-    this._authStrategies.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    this._authStrategies.sort((a, b) => (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER));
   }
 
   async applyAuthOnRequest(request: Request): Promise<Request> {

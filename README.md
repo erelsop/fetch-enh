@@ -33,6 +33,8 @@ The package ships a dual build:
 | `import` / ESM bundlers | `dist/esm/index.js` |
 | TypeScript types | `dist/index.d.ts` (also emitted into `dist/esm/`) |
 
+`dist/esm/` ships with its own `package.json` (`{"type":"module"}`) and `.js`-extended import paths so the ESM output works with native Node.js ESM (`import … from 'fetch-enh'`) without requiring a bundler.
+
 Bundlers that respect the `exports` map in `package.json` (Vite, esbuild, Rollup, webpack 5+) will automatically select the correct entry point. Source maps and declaration maps ship in both builds for debuggable production stack traces, and `"sideEffects": false` lets bundlers tree-shake unused exports.
 
 **Runtime requirement:** Node.js ≥ 18 (enforced via `engines`). The library uses global `fetch`, `AbortController`, `FormData`, `Blob`, `Headers`, and `URL`.
@@ -80,8 +82,9 @@ new FetchEnh({
 - `head({ endpoint, headers?, query? })` → `Promise<Response>` (always returns the raw `Response`; HEAD has no body)
 - `getIter({ ... })` → `AsyncGenerator<T[]>` — streaming variant of `get()` that yields one page at a time (see [Pagination](#pagination))
 - `raw({ endpoint, method?, headers?, body?, query?, applyMiddleware? })` → `Promise<Response>`
-  - By default, `raw()` calls `fetch()` directly — no interceptors, no auth, no timeout, no retries.
+  - By default, `raw()` skips all interceptors, auth, timeouts, and retries. Cross-origin redirects are still handled safely — sensitive headers (`Authorization`, `Cookie`, etc.) are stripped on cross-origin hops.
   - Pass `applyMiddleware: true` to apply request interceptors, auth strategies, and response interceptors while still skipping timeout and retry scaffolding.
+  - Pass `signal` to provide an `AbortSignal` that cancels the underlying request.
 - `addRequestInterceptor` / `removeRequestInterceptor` / `clearRequestInterceptors`
 - `addResponseInterceptor` / `removeResponseInterceptor` / `clearResponseInterceptors`
 - `useAuthStrategy` / `removeAuthStrategy` / `clearAuthStrategies`
@@ -147,7 +150,7 @@ import {
 ```
 
 - `BearerTokenAuth(store, refresh)` — sends `Authorization: Bearer <token>`; on 401 invokes `refresh()` (deduplicated across concurrent requests) and retries once.
-- `ApiKeyAuth({ headerName? | queryName?, getApiKey })` — at least one of `headerName`/`queryName` is required; constructor throws otherwise.
+- `ApiKeyAuth({ headerName? | queryName?, getApiKey })` — exactly one of `headerName`/`queryName` is required; constructor throws if neither or both are provided.
 - `BasicAuth(username, password)` — UTF‑8 safe (uses `Buffer` in Node, `TextEncoder` + `btoa` in browsers).
 - `CsrfTokenAuth(headerName, getToken)` — pulls a CSRF token from any source you provide.
 - `OAuth2ClientCredentialsAuth({ tokenURL, clientId, clientSecret, scope?, tokenStore })` — **Node-only.** The constructor throws in browser contexts to prevent client-secret exposure. Surfaces token-endpoint errors with HTTP status and validates that the response contains a string `access_token`.
@@ -178,6 +181,8 @@ const { token, expiresAtMs } = store.getAll();
 
 All outbound `fetch()` calls go through a `safeFetch()` helper that performs manual redirect handling. On a cross-origin hop, sensitive request headers (`Authorization`, `Cookie`, `Cookie2`, `Proxy-Authorization`) are stripped before the next request is issued. Up to 20 hops are followed before a `Too many redirects` error is thrown. RFC 7231 method-switching rules are applied (303 → GET; 301/302 → GET for non-safe methods; 307/308 preserve method and body).
 
+> **Browser opaque-redirect note:** In real browser environments (not jsdom), a response captured under `redirect: 'manual'` is *opaque* — its status is `0` and `Location` is not readable. In this case `safeFetch` returns the opaque response directly, which `_fetchAndParse` then treats as an HTTP error (`FetchError` with `status: 0`). If you need cross-origin redirect following in the browser, configure your server to emit `Access-Control-Allow-Origin` correctly so the browser can follow the redirect natively, or pre-resolve the redirect target server-side.
+
 ## Interceptors
 
 Interceptors compose onion-style around the underlying request. `priority` controls ordering (lower numbers run first on the way in). Returning `false` halts the chain with a typed `InterceptorAbortError` (which is **not** retried).
@@ -196,7 +201,9 @@ api.removeRequestInterceptor(myInterceptor);
 api.clearResponseInterceptors();
 ```
 
-> **Timeout note:** the timeout budget begins at the start of `_fetchAndParse`, **before** request interceptors and auth strategies execute. Slow interceptors consume timeout before the actual network call; keep them fast or increase `timeout` accordingly.
+> **Retry note:** request interceptors run **once per logical request call** (before the retry loop). Auth strategies run once per attempt so a token refresh during a retry window takes effect immediately.
+
+> **Timeout note:** the timeout budget begins at the start of each fetch attempt, **before** auth strategies execute. Slow auth strategies consume timeout before the actual network call; keep them fast or increase `timeout` accordingly.
 
 ## Response types
 
@@ -256,6 +263,8 @@ for await (const page of api.getIter<Item>({
 
 `getIter()` accepts the same options as `get()`. For a non-paginated GET it yields a single one-element array containing the result.
 
+> **Early-break cancellation:** when you `break` out of a `for await` loop (or the generator is closed via `return` / `throw`), any in-flight HTTP request for the current page is automatically aborted. This prevents wasting bandwidth and server-side work on results you no longer need — useful for "find first match" patterns over large cursor-paginated datasets.
+
 ## Query parameters
 
 ```ts
@@ -313,6 +322,8 @@ await api.get({ endpoint: '/slow', options: { timeout: 5000, signal: c.signal } 
 - `dedupe`: coalesce concurrent identical **GET / HEAD / OPTIONS** requests into a single in-flight promise. Mutation methods (POST, DELETE, PATCH, PUT) are **not** deduplicated by default — each call produces its own side-effect. To opt mutation methods into deduplication, supply an explicit `dedupeKey` factory at construction time.
 
 > **Note:** the dedup key is computed from the pre-interceptor `Request`. Interceptors that add unique headers or rewrite the URL are not reflected in the key, so semantically distinct requests may be coalesced. Disable dedup or supply a custom `dedupeKey` if your interceptors make requests unique.
+
+> **Dedup cache bounds:** The dedup cache tracks only *in-flight* promises — each entry is removed via `.finally()` as soon as the request settles. In practice this is self-limiting because requests resolve. In theory, a server that hangs indefinitely on every unique URL could cause the cache to grow without bound in very-long-lived processes. If this is a concern, avoid enabling `dedupe` against endpoints that may stall.
 
 ## Environment
 

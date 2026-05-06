@@ -45,10 +45,12 @@ export function setContentTypeHeader(
 export function serializeBody(body: BodyType): BodyType | string {
   if (
     typeof body === 'object' &&
+    body !== null &&
     !(body instanceof FormData) &&
     !(body instanceof Blob) &&
     !(body instanceof ArrayBuffer) &&
-    !(body instanceof URLSearchParams)
+    !(body instanceof URLSearchParams) &&
+    !(typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
   ) {
     return JSON.stringify(body);
   }
@@ -88,10 +90,12 @@ export function resolveBody(
     const f = retryCtx.bodyFactory();
     return (
       typeof f === 'object' &&
+      f !== null &&
       !(f instanceof FormData) &&
       !(f instanceof Blob) &&
       !(f instanceof ArrayBuffer) &&
-      !(f instanceof URLSearchParams)
+      !(f instanceof URLSearchParams) &&
+      !(typeof ReadableStream !== 'undefined' && f instanceof ReadableStream)
     )
       ? JSON.stringify(f)
       : (f as BodyInit);
@@ -119,7 +123,8 @@ export function preSerializeBody(
     !(body instanceof FormData) &&
     !(body instanceof Blob) &&
     !(body instanceof ArrayBuffer) &&
-    !(body instanceof URLSearchParams)
+    !(body instanceof URLSearchParams) &&
+    !(typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
   ) {
     return JSON.stringify(body);
   }

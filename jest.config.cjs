@@ -16,10 +16,14 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'json-summary', 'html'],
   coverageThreshold: {
     global: {
-      branches: 70,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      // Targets are intentionally higher than the original 70/80/80/80 floor.
+      // Raise branches toward 85 and functions toward 90 as new tests are added
+      // for the remaining uncovered paths (e.g. browser-only branches in BasicAuth,
+      // inner callbacks in _fetchAndParse, and pagination edge cases).
+      branches: 80,
+      functions: 85,
+      lines: 90,
+      statements: 90,
     },
   },
 };

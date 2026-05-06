@@ -20,9 +20,9 @@
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage",
     "test:watch": "jest --watch",
-    "build": "tsc && tsc -p tsconfig.esm.json",
+    "build": "tsc && tsc -p tsconfig.esm.json && node scripts/esm-fixup.mjs",
     "build:cjs": "tsc",
-    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:esm": "tsc -p tsconfig.esm.json && node scripts/esm-fixup.mjs",
     "build:watch": "tsc --watch"
   },
   "repository": {

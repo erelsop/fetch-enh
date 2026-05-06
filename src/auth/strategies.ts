@@ -16,6 +16,12 @@ export class ApiKeyAuth implements AuthStrategy {
         '[FetchEnh] ApiKeyAuth: at least one of `headerName` or `queryName` must be provided.'
       );
     }
+    if (this.headerName && this.queryName) {
+      throw new Error(
+        '[FetchEnh] ApiKeyAuth: provide exactly one of `headerName` or `queryName`, not both. ' +
+        'Supplying both is ambiguous — the query parameter would be silently ignored.'
+      );
+    }
   }
 
   async onRequest(request: Request): Promise<Request | void> {
