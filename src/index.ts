@@ -27,7 +27,7 @@ import type { RetryClassifier, BackoffStrategy, RetryConfig } from './types/retr
 import type { AuthStrategy } from './types/auth';
 
 // ── Core modules ──────────────────────────────────────────────────────────────
-import { buildRequest, type QueryStyle } from './core/requestBuilder';
+import { buildRequest, safeFetch, type QueryStyle } from './core/requestBuilder';
 import {
   isReplayableBody,
   resolveBody,
@@ -201,7 +201,7 @@ class FetchEnh {
         body: fetchBody,
         signal: controller.signal,
       };
-      const response = await fetch(urlForFetch, initForFetch);
+      const response = await safeFetch(urlForFetch, initForFetch);
 
       // Apply response interceptors
       const interceptedResponse = await this._applyResponseInterceptors(response);
@@ -244,14 +244,27 @@ class FetchEnh {
         // ── Auth error handling (401 / 403) ─────────────────────────────
         if (interceptedResponse.status === 401 || interceptedResponse.status === 403) {
           const authRetryFn = async (newReq: Request): Promise<Response> => {
-            const authBody = resolveBody(retryCtx, newReq);
-            const newInit: RequestInit = {
-              method: newReq.method,
-              headers: newReq.headers as any,
-              body: authBody,
-              signal: controller.signal,
-            };
-            return fetch(newReq.url, newInit);
+            // Create a fresh AbortController so the auth retry gets a full
+            // timeout budget — the original controller may already have fired.
+            const authController = new AbortController();
+            const authTimeoutId = timeout > 0
+              ? setTimeout(() => authController.abort(), timeout)
+              : null;
+            const authAbortFwd = () => authController.abort();
+            if (externalSignal) externalSignal.addEventListener('abort', authAbortFwd);
+            try {
+              const authBody = resolveBody(retryCtx, newReq);
+              const newInit: RequestInit = {
+                method: newReq.method,
+                headers: newReq.headers as any,
+                body: authBody,
+                signal: authController.signal,
+              };
+              return await safeFetch(newReq.url, newInit);
+            } finally {
+              if (authTimeoutId) clearTimeout(authTimeoutId);
+              if (externalSignal) externalSignal.removeEventListener('abort', authAbortFwd);
+            }
           };
 
           const authResult = await this._auth.handleAuthError(

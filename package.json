@@ -38,6 +38,7 @@
   ],
   "author": "Ethan Elsop <ethanrelsop@gmail.com>",
   "license": "MIT",
+  "engines": { "node": ">=18" },
   "devDependencies": {
     "@types/jest": "^29.5.6",
     "@types/node": "^16.11.0",

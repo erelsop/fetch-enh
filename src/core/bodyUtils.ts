@@ -29,7 +29,9 @@ export function setContentTypeHeader(
   } else if (
     typeof body === 'object' &&
     !(body instanceof ArrayBuffer) &&
-    !(body instanceof Blob)
+    !(body instanceof Blob) &&
+    !(body instanceof URLSearchParams) &&
+    !(typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
   ) {
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   }

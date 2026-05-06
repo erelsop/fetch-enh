@@ -138,3 +138,92 @@ export function buildRequest(params: BuildRequestParams): Request {
     body: adjustedBody as any,
   });
 }
+
+/** Headers that must not be forwarded to a different origin on redirect. */
+const SENSITIVE_REQUEST_HEADERS = [
+  'authorization',
+  'cookie',
+  'cookie2',
+  'proxy-authorization',
+];
+
+const MAX_REDIRECTS = 20;
+
+/**
+ * Drop-in replacement for `fetch` that performs manual redirect handling so
+ * that sensitive request headers (`Authorization`, `Cookie`, etc.) are
+ * **stripped** when a redirect leads to a different origin.
+ *
+ * - Uses `redirect: 'manual'` on every hop.
+ * - On a 3xx response, reads the `Location` header (works in Node.js 18+;
+ *   returns the raw opaque response in browser environments where Location is
+ *   inaccessible, leaving the caller to handle it).
+ * - Follows up to {@link MAX_REDIRECTS} hops before throwing.
+ * - 303 See Other always switches to GET; 307/308 keep the original method
+ *   and body; 301/302 switch to GET (per-spec / browser convention).
+ */
+export async function safeFetch(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  let currentUrl = url;
+  let currentMethod = init.method ?? 'GET';
+  let currentHeaders = new Headers(init.headers);
+  let currentBody: BodyInit | null | undefined = init.body as BodyInit | null | undefined;
+  const signal = init.signal;
+
+  for (let hops = 0; hops <= MAX_REDIRECTS; hops++) {
+    const response = await fetch(currentUrl, {
+      method: currentMethod,
+      headers: currentHeaders,
+      body: currentBody,
+      signal,
+      redirect: 'manual',
+    });
+
+    // Not a redirect — return as-is
+    if (response.status < 300 || response.status >= 400) return response;
+
+    // Try to read Location (accessible in Node.js; null for browser opaque-redirects)
+    const location = response.headers.get('location');
+    if (!location) return response; // can't follow; return opaque response
+
+    let targetURL: URL;
+    try {
+      targetURL = new URL(location, currentUrl);
+    } catch {
+      return response; // malformed Location
+    }
+
+    const currentOrigin = new URL(currentUrl).origin;
+    const isSameOrigin = targetURL.origin === currentOrigin;
+
+    // Strip credentials on cross-origin hops
+    const nextHeaders = new Headers(currentHeaders);
+    if (!isSameOrigin) {
+      for (const h of SENSITIVE_REQUEST_HEADERS) {
+        nextHeaders.delete(h);
+      }
+    }
+
+    // Method switching per RFC 7231 / browser convention:
+    //   303 → always GET
+    //   301 / 302 → switch to GET (browser convention for non-safe methods)
+    //   307 / 308 → keep original method and body
+    const switchToGet =
+      response.status === 303 ||
+      ((response.status === 301 || response.status === 302) &&
+        currentMethod !== 'GET' &&
+        currentMethod !== 'HEAD');
+
+    if (switchToGet) {
+      currentMethod = 'GET';
+      currentBody = undefined;
+    }
+
+    currentUrl = targetURL.toString();
+    currentHeaders = nextHeaders;
+  }
+
+  throw new Error(`Too many redirects following ${url}`);
+}

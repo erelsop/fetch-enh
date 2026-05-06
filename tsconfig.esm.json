@@ -4,6 +4,8 @@
     "module": "ES2020",
     "moduleResolution": "node",
     "outDir": "./dist/esm",
-    "declaration": false
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true
   }
 }
