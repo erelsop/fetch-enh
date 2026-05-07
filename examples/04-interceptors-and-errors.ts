@@ -137,9 +137,13 @@ async function transformInterceptorExample() {
           }
         };
         
+        // Clone headers and drop Content-Length — the new body is a different
+        // size, so propagating the original header would be stale.
+        const responseHeaders = new Headers(response.headers);
+        responseHeaders.delete('content-length');
         return new Response(JSON.stringify(enhanced), {
           status: response.status,
-          headers: response.headers
+          headers: responseHeaders,
         });
       }
       
@@ -222,7 +226,7 @@ async function globalErrorHandlerExample() {
   const makeRequest = async (fn: () => Promise<any>) => {
     try {
       return await fn();
-    } catch (error) {
+    } catch (error: any) {
       errorHandler.handle(error, error.request || {});
       throw error;  // Re-throw if needed
     }

@@ -184,6 +184,33 @@ describe('granular retry setters', () => {
     await expect(api.post({ endpoint: '/data', body: {} })).rejects.toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1); // no retry for POST
   });
+
+  test('setRetryBehavior(null, null) reverts both classifier and backoff to built-in defaults', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 1 });
+
+    // Install a never-retry classifier so the first request does not retry.
+    api.setRetryBehavior(
+      { shouldRetry: () => false },
+      { computeDelay: () => 0 },
+    );
+    fetchMock.mockResponseOnce('', { status: 500 });
+    await expect(api.get({ endpoint: '/no-retry' })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // custom classifier prevented retry
+
+    // Revert both components to built-in defaults via setRetryBehavior(null, null).
+    api.setRetryBehavior(null, null);
+    fetchMock.resetMocks();
+    fetchMock
+      .mockResponseOnce('', { status: 500 })
+      .mockResponseOnce(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    const result = await api.get({ endpoint: '/retried', responseType: 'auto' });
+    expect(result).toEqual({ ok: true });
+    // Built-in classifier retried the 500 → 2 total calls.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('interceptor abort via InterceptorAbortError', () => {

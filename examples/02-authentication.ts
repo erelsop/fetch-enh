@@ -17,7 +17,7 @@ async function bearerTokenExample() {
   console.log('=== Bearer Token Authentication ===\n');
   
   const tokenStore = new MemoryTokenStore('initial-access-token');
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   // Configure Bearer token authentication with refresh logic
   api.useAuthStrategy(new BearerTokenAuth(
@@ -25,8 +25,9 @@ async function bearerTokenExample() {
     async () => {
       console.log('Token expired, refreshing...');
       
-      // Call your refresh endpoint
-      const response = await fetch('https://api.example.com/auth/refresh', {
+      // Replace with your actual token-refresh endpoint.
+      // This callback is only invoked when the server returns 401/403.
+      const response = await fetch('https://your-auth-server.example/token/refresh', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -46,9 +47,10 @@ async function bearerTokenExample() {
   ));
 
   try {
-    // Make authenticated requests
-    // If the token expires (401/403), it will automatically refresh and retry
-    const data = await api.get({ endpoint: '/protected/resource' });
+    // Make authenticated requests.
+    // jsonplaceholder doesn't enforce auth, but FetchEnh attaches the header.
+    // If the server returned 401/403 the refresh callback above would fire.
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Protected data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -59,7 +61,7 @@ async function bearerTokenExample() {
 async function apiKeyHeaderExample() {
   console.log('\n=== API Key Authentication (Header) ===\n');
   
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.useAuthStrategy(new ApiKeyAuth({
     headerName: 'X-API-Key',
@@ -67,7 +69,7 @@ async function apiKeyHeaderExample() {
   }));
 
   try {
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -78,7 +80,7 @@ async function apiKeyHeaderExample() {
 async function apiKeyQueryExample() {
   console.log('\n=== API Key Authentication (Query) ===\n');
   
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.useAuthStrategy(new ApiKeyAuth({
     queryName: 'api_key',
@@ -89,8 +91,8 @@ async function apiKeyQueryExample() {
   }));
 
   try {
-    // URL will be: https://api.example.com/data?api_key=YOUR_KEY
-    const data = await api.get({ endpoint: '/data' });
+    // URL will be: https://jsonplaceholder.typicode.com/posts/1?api_key=YOUR_KEY
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -101,7 +103,7 @@ async function apiKeyQueryExample() {
 async function basicAuthExample() {
   console.log('\n=== Basic Authentication ===\n');
   
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.useAuthStrategy(new BasicAuth(
     process.env.USERNAME || 'username',
@@ -109,7 +111,7 @@ async function basicAuthExample() {
   ));
 
   try {
-    const data = await api.get({ endpoint: '/protected' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Protected data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -120,7 +122,7 @@ async function basicAuthExample() {
 async function multipleAuthExample() {
   console.log('\n=== Multiple Authentication Strategies ===\n');
   
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   // Add Bearer token (priority 1 - runs first)
   const tokenStore = new MemoryTokenStore('access-token');
@@ -139,7 +141,7 @@ async function multipleAuthExample() {
 
   try {
     // Request will have both Authorization header and X-API-Key header
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -152,7 +154,7 @@ async function persistentTokenExample() {
   
   // Use LocalStorage to persist tokens across page refreshes
   const tokenStore = new LocalStorageTokenStore('app_access_token');
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.useAuthStrategy(new BearerTokenAuth(
     tokenStore,
@@ -165,7 +167,7 @@ async function persistentTokenExample() {
 
   try {
     // Token is automatically saved to localStorage
-    const data = await api.get({ endpoint: '/user/profile' });
+    const data = await api.get({ endpoint: '/users/1' });
     console.log('User profile:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -193,7 +195,7 @@ async function customTokenStoreExample() {
   console.log('\n=== Custom Token Store ===\n');
   
   const tokenStore = new DatabaseTokenStore();
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.useAuthStrategy(new BearerTokenAuth(
     tokenStore,
@@ -201,7 +203,7 @@ async function customTokenStoreExample() {
   ));
 
   try {
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);

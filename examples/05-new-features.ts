@@ -73,47 +73,53 @@ async function genericTypeExample() {
 async function complexGenericExample() {
   console.log('\n=== Complex Generic Types ===\n');
   
-  const api = new FetchEnh({ baseURL: 'https://api.example.com' });
+  // Demonstrates complex generic type patterns; types mirror the jsonplaceholder
+  // response shape — adapt to your API's actual response structure.
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
-  // API wrapper response
-  interface ApiResponse<T> {
-    data: T;
-    status: number;
-    message: string;
-    timestamp: string;
-  }
-
-  // Paginated response
-  interface PaginatedResponse<T> {
+  // Generic slice helper — wraps an array with a count (illustrative pattern)
+  interface Slice<T> {
     items: T[];
-    page: number;
-    perPage: number;
-    total: number;
-    hasMore: boolean;
+    count: number;
   }
 
-  interface Product {
-    id: string;
+  interface Post {
+    id: number;
+    userId: number;
+    title: string;
+    body: string;
+  }
+
+  interface Comment {
+    id: number;
+    postId: number;
     name: string;
-    price: number;
+    email: string;
+    body: string;
   }
 
   try {
-    // Wrapped API response
-    const response = await api.get<ApiResponse<Product>>({ 
-      endpoint: '/products/123' 
-    });
-    console.log('Product:', response.data.name, '$' + response.data.price);
-    console.log('Status:', response.status, response.message);
+    // Strongly-typed single resource
+    const post = await api.get<Post>({ endpoint: '/posts/1' });
+    console.log('Post:', post.title);
+    console.log('Author userId:', post.userId);
 
-    // Paginated response
-    const paginatedProducts = await api.get<PaginatedResponse<Product>>({
-      endpoint: '/products',
-      query: { page: 1, limit: 20 }
+    // Typed array response — wrap into a generic Slice to show nested generics
+    const posts = await api.get<Post[]>({
+      endpoint: '/posts',
+      query: { _limit: 5 },
     });
-    console.log(`Page ${paginatedProducts.page} of products:`);
-    paginatedProducts.items.forEach(p => console.log(`  - ${p.name}: $${p.price}`));
-    console.log(`Total: ${paginatedProducts.total}, Has more: ${paginatedProducts.hasMore}`);
+    const slice: Slice<Post> = { items: posts, count: posts.length };
+    console.log(`\nFirst ${slice.count} posts:`);
+    slice.items.forEach(p => console.log(`  [${p.id}] ${p.title.slice(0, 50)}`));
+
+    // Filtered subresource list
+    const comments = await api.get<Comment[]>({
+      endpoint: '/comments',
+      query: { postId: 1, _limit: 3 },
+    });
+    console.log(`\n${comments.length} comments on post 1:`);
+    comments.forEach(c => console.log(`  ${c.email}: ${c.body.slice(0, 40)}`));
 
   } catch (error) {
     console.error('Error:', error);

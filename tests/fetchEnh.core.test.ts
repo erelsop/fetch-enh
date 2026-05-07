@@ -58,8 +58,7 @@ test('multiple request interceptors compose mutations', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   api.addRequestInterceptor({
     priority: 1,
-    handler: async (req, next) => {
-      await next();
+    handler: (req) => {
       const h = new Headers(req.headers);
       h.set('X-A', 'a');
       return new Request(req, { headers: h });
@@ -67,8 +66,7 @@ test('multiple request interceptors compose mutations', async () => {
   });
   api.addRequestInterceptor({
     priority: 2,
-    handler: async (req, next) => {
-      await next();
+    handler: (req) => {
       const h = new Headers(req.headers);
       h.set('X-B', 'b');
       return new Request(req, { headers: h });
@@ -84,18 +82,17 @@ test('multiple request interceptors compose mutations', async () => {
 
 test('multiple response interceptors compose transformations', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // priority 1 runs first (adds a:true); priority 2 runs second (adds b:true).
   api.addResponseInterceptor({
     priority: 2,
-    handler: async (res, next) => {
-      await next();
+    handler: async (res) => {
       const data = await res.json();
       return new Response(JSON.stringify({ ...data, b: true }), { headers: res.headers, status: res.status });
     },
   });
   api.addResponseInterceptor({
     priority: 1,
-    handler: async (res, next) => {
-      await next();
+    handler: async (res) => {
       const data = await res.json();
       return new Response(JSON.stringify({ ...data, a: true }), { headers: res.headers, status: res.status });
     },
@@ -104,6 +101,31 @@ test('multiple response interceptors compose transformations', async () => {
   fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
   const result = await api.get<any>({ endpoint: '/r', responseType: 'json' });
   expect(result).toEqual({ ok: true, a: true, b: true });
+});
+
+// Regression pin for R-1 (silent-drop footgun): a handler that returns the
+// result of next() (a no-op resolving to undefined) silently discards any
+// Request mutations it built.  This test documents that behaviour so that any
+// future change to the pipeline semantics is immediately visible.
+test('handler returning await next() silently drops its Request mutation (anti-pattern pin)', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  api.addRequestInterceptor({
+    handler: async (req, next) => {
+      const h = new Headers(req.headers);
+      h.set('X-Should-Be-Dropped', 'x');
+      // Build the mutated request but return next() instead — mutations lost.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _newReq = new Request(req, { headers: h });
+      return await next!(); // next() returns undefined → _newReq is discarded
+    },
+  });
+  fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.get({ endpoint: '/silent-drop' });
+  const init = fetchMock.mock.calls[0][1] as RequestInit;
+  const headers = init.headers as any;
+  // If this ever flips to toBe('x') the forward-pipeline semantics changed —
+  // update the README Interceptors section and this comment accordingly.
+  expect(headers.get('X-Should-Be-Dropped')).toBeNull();
 });
 
 test('query serializer handles arrays and nested objects', async () => {
@@ -199,7 +221,7 @@ test('remove and clear interceptors', async () => {
   const h1 = (fetchMock.mock.calls[0][1]?.headers as any);
   expect(h1.get('X-Temp')).toBeNull();
 
-  api.addResponseInterceptor({ handler: async (res: Response, next: Function) => { await next(); const d = await res.json(); return new Response(JSON.stringify({ ...d, t: 1 }), { headers: res.headers, status: res.status }); } });
+  api.addResponseInterceptor({ handler: async (res: Response) => { const d = await res.json(); return new Response(JSON.stringify({ ...d, t: 1 }), { headers: res.headers, status: res.status }); } });
   api.clearResponseInterceptors();
   fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
   const out = await api.get<any>({ endpoint: '/no-transform' });

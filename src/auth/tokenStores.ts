@@ -25,8 +25,9 @@ export class MemoryTokenStore implements TokenStore {
    * Stores a token with a time-to-live in milliseconds.
    * After `ttlMs` elapses, `getToken()` returns `null` automatically.
    *
-   * Centralises expiry tracking so auth strategies do not need to maintain
-   * their own `expiresAt` timestamps.
+   * Useful when consuming token endpoint responses that don't propagate expiry
+   * through the strategy layer (e.g. a custom strategy that delegates token
+   * fetching to a side-channel rather than using the built-in OAuth2 strategies).
    *
    * @example
    * store.setTokenWithExpiry(json.access_token, json.expires_in * 1000);

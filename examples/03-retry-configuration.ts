@@ -12,7 +12,7 @@ async function defaultRetryExample() {
   console.log('=== Default Retry Behavior ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 3
   });
 
@@ -22,7 +22,7 @@ async function defaultRetryExample() {
     // - 429 (Too Many Requests)
     // - Network errors
     // - Only for idempotent methods (GET, HEAD, OPTIONS, PUT)
-    const data = await api.get({ endpoint: '/unstable-endpoint' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Failed after retries:', error);
@@ -34,7 +34,7 @@ async function customRetryClassifierExample() {
   console.log('\n=== Custom Retry Classifier ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 5
   });
 
@@ -70,7 +70,7 @@ async function customRetryClassifierExample() {
   api.setRetryBehavior(customClassifier, customBackoff);
 
   try {
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -82,7 +82,7 @@ async function exponentialBackoffExample() {
   console.log('\n=== Exponential Backoff with Jitter ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 5
   });
 
@@ -111,7 +111,7 @@ async function exponentialBackoffExample() {
   api.setRetryBehavior(classifier, backoff);
 
   try {
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -123,7 +123,7 @@ async function retryAfterExample() {
   console.log('\n=== Retry-After Header Support ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 3
   });
 
@@ -163,7 +163,7 @@ async function retryAfterExample() {
   );
 
   try {
-    const data = await api.get({ endpoint: '/rate-limited' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);
@@ -175,7 +175,7 @@ async function nonIdempotentRetryExample() {
   console.log('\n=== Retries for POST Requests ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 3
   });
 
@@ -199,8 +199,8 @@ async function nonIdempotentRetryExample() {
   try {
     // POST will now retry on failures
     const result = await api.post({
-      endpoint: '/submit',
-      body: { data: 'important' }
+      endpoint: '/posts',
+      body: { title: 'Important', body: 'content', userId: 1 }
     });
     console.log('Result:', result);
   } catch (error) {
@@ -213,14 +213,14 @@ async function perRequestRetryExample() {
   console.log('\n=== Per-Request Retry Override ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 3
   });
 
   try {
     // Override retries for this specific request
     const criticalData = await api.get({
-      endpoint: '/critical',
+      endpoint: '/posts/1',
       options: {
         retries: 10,  // Try 10 times instead of default 3
         timeout: 5000
@@ -230,7 +230,7 @@ async function perRequestRetryExample() {
 
     // No retries for this request
     const cachedData = await api.get({
-      endpoint: '/cached',
+      endpoint: '/posts/2',
       options: {
         retries: 0  // Don't retry this one
       }
@@ -277,7 +277,7 @@ async function circuitBreakerExample() {
   console.log('\n=== Circuit Breaker Pattern ===\n');
   
   const api = new FetchEnh({
-    baseURL: 'https://api.example.com',
+    baseURL: 'https://jsonplaceholder.typicode.com',
     defaultRetries: 2
   });
 
@@ -314,7 +314,7 @@ async function circuitBreakerExample() {
   });
 
   try {
-    const data = await api.get({ endpoint: '/data' });
+    const data = await api.get({ endpoint: '/posts/1' });
     console.log('Data:', data);
   } catch (error) {
     console.error('Request failed:', error);

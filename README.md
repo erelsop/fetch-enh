@@ -104,6 +104,10 @@ api.setRetryBehavior(
   { idempotentOnly: true, respectRetryAfter: true, maxElapsedMs: 30000, allowUnsafeRetries: false, idempotencyKeyFactory: () => crypto.randomUUID() }
 );
 
+// Pass null to revert classifier and/or backoff to built-in defaults in one call:
+api.setRetryBehavior(null, null);                              // revert both
+api.setRetryBehavior(null, null, { maxElapsedMs: 30_000 });   // revert both + update config
+
 // Or update piecewise:
 api.setRetryClassifier(null);          // revert to built-in (5xx + 429)
 api.setBackoffStrategy(null);          // revert to built-in exponential + jitter
@@ -324,7 +328,7 @@ await api.get({ endpoint: '/slow', options: { timeout: 5000, signal: c.signal } 
 
 > **Note:** the dedup key is computed from the pre-interceptor `Request`. Interceptors that add unique headers or rewrite the URL are not reflected in the key, so semantically distinct requests may be coalesced. Disable dedup or supply a custom `dedupeKey` if your interceptors make requests unique.
 
-> **Dedup cache bounds:** The dedup cache tracks only *in-flight* promises — each entry is removed via `.finally()` as soon as the request settles. In practice this is self-limiting because requests resolve. In theory, a server that hangs indefinitely on every unique URL could cause the cache to grow without bound in very-long-lived processes. If this is a concern, avoid enabling `dedupe` against endpoints that may stall.
+> **Dedup cache bounds:** The dedup cache tracks only *in-flight* promises — each entry is removed as soon as the underlying request settles (success or failure). In practice this is self-limiting because requests resolve. In theory, a server that hangs indefinitely on every unique URL could cause the cache to grow without bound in very-long-lived processes. If this is a concern, avoid enabling `dedupe` against endpoints that may stall.
 
 ## Environment
 
