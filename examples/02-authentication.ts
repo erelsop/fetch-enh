@@ -234,14 +234,12 @@ async function deleteTokenFromDatabase(): Promise<void> {
 }
 
 // Run examples
-if (require.main === module) {
-  (async () => {
-    await bearerTokenExample();
-    await apiKeyHeaderExample();
-    await apiKeyQueryExample();
-    await basicAuthExample();
-    await multipleAuthExample();
-    await persistentTokenExample();
-    await customTokenStoreExample();
-  })();
-}
+(async () => {
+  await bearerTokenExample();
+  await apiKeyHeaderExample();
+  await apiKeyQueryExample();
+  await basicAuthExample();
+  await multipleAuthExample();
+  await persistentTokenExample();
+  await customTokenStoreExample();
+})();

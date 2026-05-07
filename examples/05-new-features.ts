@@ -270,13 +270,11 @@ async function typeSafeErrorHandlingExample() {
 }
 
 // Run all examples
-if (require.main === module) {
-  (async () => {
-    await genericTypeExample();
-    await complexGenericExample();
-    await abortControllerExample();
-    await abortMultipleRequestsExample();
-    await combinedFeaturesExample();
-    await typeSafeErrorHandlingExample();
-  })();
-}
+(async () => {
+  await genericTypeExample();
+  await complexGenericExample();
+  await abortControllerExample();
+  await abortMultipleRequestsExample();
+  await combinedFeaturesExample();
+  await typeSafeErrorHandlingExample();
+})();

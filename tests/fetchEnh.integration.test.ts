@@ -88,6 +88,29 @@ beforeAll(async () => {
       return;
     }
 
+    // GET /paginated?page=N&pageSize=M → page-based pagination fixture
+    // Page 1 responds immediately with [1, 2, 3].
+    // Page 2+ hangs for 10 s so an AbortSignal can cancel the in-flight request
+    // before the response arrives — used to exercise composeSignals / AbortSignal.any.
+    if (method === 'GET' && url?.startsWith('/paginated')) {
+      const parsedUrl = new URL(url, 'http://localhost');
+      const page = parseInt(parsedUrl.searchParams.get('page') ?? '1', 10);
+      if (page === 1) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([1, 2, 3]));
+      } else {
+        // Hang so the abort signal has time to fire before we respond.
+        const timer = setTimeout(() => {
+          if (!res.writableEnded) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([4, 5, 6]));
+          }
+        }, 10_000);
+        res.on('close', () => clearTimeout(timer));
+      }
+      return;
+    }
+
     // Fallback 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
@@ -167,6 +190,41 @@ test('FetchError.status is 404 for GET /not-found', async () => {
   expect(caughtError).toBeInstanceOf(FetchError);
   expect(caughtError!.status).toBe(404);
 });
+
+// Q-5 regression: getIter should cancel the in-flight page-2 request when the
+// caller's AbortSignal fires.  This exercises the composeSignals() helper that
+// delegates to AbortSignal.any() — the branch that had no test coverage after
+// the P-7 polyfill removal.
+test('getIter with user signal: aborting mid-iteration cancels the in-flight request', async () => {
+  const api = new FetchEnh({ baseURL, defaultRetries: 0 });
+  const controller = new AbortController();
+
+  const received: number[][] = [];
+  let caughtError: Error | null = null;
+
+  try {
+    for await (const page of api.getIter<number>({
+      endpoint: '/paginated',
+      page: 1,
+      pageSize: 3,
+      options: { signal: controller.signal },
+    })) {
+      received.push(page as number[]);
+      // Abort after page 1 so the in-flight request for page 2 is cancelled.
+      controller.abort();
+    }
+  } catch (e: unknown) {
+    caughtError = e as Error;
+  }
+
+  // Page 1 must have been received before the abort.
+  expect(received).toHaveLength(1);
+  expect(received[0]).toEqual([1, 2, 3]);
+
+  // The pending page-2 request must have been terminated via composeSignals.
+  expect(caughtError).toBeTruthy();
+  expect(caughtError!.name).toBe('AbortError');
+}, 15_000);
 
 // P-5 regression tests: raw() with a body must work on real (undici) fetch.
 // Before the P-1 fix these threw "RequestInit: duplex option is required when

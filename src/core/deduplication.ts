@@ -45,12 +45,20 @@ export class DeduplicationCache {
 
   /**
    * Registers a promise for the given dedup key and auto-removes it on completion.
+   *
+   * Uses `.then(cleanup, cleanup)` instead of `.finally(cleanup)` to avoid
+   * creating a discarded chained promise that inherits the rejection without a
+   * handler. Under Node ≥15 `--unhandled-rejections=throw` semantics, a
+   * `.finally()` chain on a rejected promise fires `unhandledRejection` and
+   * terminates the process even when the caller's copy of the promise is
+   * properly awaited and caught.
    */
   track<T>(key: string, promise: Promise<T>): void {
     this._inflight.set(key, promise);
-    promise.finally(() => {
-      this._inflight.delete(key);
-    });
+    promise.then(
+      () => { this._inflight.delete(key); },
+      () => { this._inflight.delete(key); },
+    );
   }
 
   /**

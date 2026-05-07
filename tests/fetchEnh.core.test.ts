@@ -499,3 +499,36 @@ describe('clearRequestInterceptors and clearResponseInterceptors', () => {
     expect(() => api.clearResponseInterceptors()).not.toThrow();
   });
 });
+
+// ─── Deduplication: unhandledRejection regression (Q-1) ──────────────────────
+//
+// DeduplicationCache.track() used to call promise.finally(cleanup), which
+// creates a new chained promise that inherits the rejection.  That chained
+// promise was discarded (never awaited/caught), so Node emitted
+// `unhandledRejection` even though the caller's copy of the promise was fully
+// caught.  The fix replaces .finally() with .then(cleanup, cleanup) so no
+// rejection leaks onto a dangling promise chain.
+
+test('dedupe: true does not fire unhandledRejection when a deduped request rejects', async () => {
+  const unhandledSpy = jest.fn();
+  process.on('unhandledRejection', unhandledSpy);
+
+  try {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0, dedupe: true });
+    // Simulate a 500 response — with 0 retries this rejects immediately.
+    fetchMock.mockResponseOnce('', { status: 500, headers: { 'content-type': 'application/json' } });
+
+    await expect(api.get({ endpoint: '/fail' })).rejects.toBeTruthy();
+
+    // Give the microtask queue (and any chained-promise settlements) time to drain
+    // before checking whether unhandledRejection fired.  setImmediate is not
+    // available in jsdom so we use setTimeout(0) which still yields a full
+    // macrotask turn — long enough for Node to emit the event.
+    await new Promise<void>((r) => setTimeout(r, 0));
+    await new Promise<void>((r) => setTimeout(r, 0));
+
+    expect(unhandledSpy).not.toHaveBeenCalled();
+  } finally {
+    process.off('unhandledRejection', unhandledSpy);
+  }
+});

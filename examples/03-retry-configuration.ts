@@ -305,11 +305,10 @@ async function circuitBreakerExample() {
 
   // Add response interceptor to record successes
   api.addResponseInterceptor({
-    handler: async (response, next) => {
+    handler: async (response) => {
       if (response.ok) {
         breaker.recordSuccess();
       }
-      await next();
       return response;
     }
   });
@@ -323,14 +322,12 @@ async function circuitBreakerExample() {
 }
 
 // Run examples
-if (require.main === module) {
-  (async () => {
-    await defaultRetryExample();
-    await customRetryClassifierExample();
-    await exponentialBackoffExample();
-    await retryAfterExample();
-    await nonIdempotentRetryExample();
-    await perRequestRetryExample();
-    await circuitBreakerExample();
-  })();
-}
+(async () => {
+  await defaultRetryExample();
+  await customRetryClassifierExample();
+  await exponentialBackoffExample();
+  await retryAfterExample();
+  await nonIdempotentRetryExample();
+  await perRequestRetryExample();
+  await circuitBreakerExample();
+})();

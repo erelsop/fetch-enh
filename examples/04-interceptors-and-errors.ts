@@ -16,10 +16,9 @@ async function loggingInterceptorExample() {
   // Request logging
   api.addRequestInterceptor({
     priority: 1,
-    handler: async (request, next) => {
+    handler: async (request) => {
       console.log(`→ ${request.method} ${request.url}`);
       console.log('  Headers:', Object.fromEntries(request.headers.entries()));
-      await next();
       return request;
     }
   });
@@ -27,9 +26,8 @@ async function loggingInterceptorExample() {
   // Response logging
   api.addResponseInterceptor({
     priority: 1,
-    handler: async (response, next) => {
+    handler: async (response) => {
       console.log(`← ${response.status} ${response.statusText}`);
-      await next();
       return response;
     }
   });
@@ -50,20 +48,18 @@ async function timestampInterceptorExample() {
   let requestStart: number;
 
   api.addRequestInterceptor({
-    handler: async (request, next) => {
+    handler: async (request) => {
       requestStart = Date.now();
       const headers = new Headers(request.headers);
       headers.set('X-Request-Time', requestStart.toString());
-      await next();
       return new Request(request, { headers });
     }
   });
 
   api.addResponseInterceptor({
-    handler: async (response, next) => {
+    handler: async (response) => {
       const duration = Date.now() - requestStart;
       console.log(`Request completed in ${duration}ms`);
-      await next();
       return response;
     }
   });
@@ -98,19 +94,17 @@ async function analyticsInterceptorExample() {
   let startTime: number;
 
   api.addRequestInterceptor({
-    handler: async (request, next) => {
+    handler: async (request) => {
       startTime = Date.now();
       analytics.trackRequest(request.method, request.url);
-      await next();
       return request;
     }
   });
 
   api.addResponseInterceptor({
-    handler: async (response, next) => {
+    handler: async (response) => {
       const duration = Date.now() - startTime;
       analytics.trackResponse(response.status, duration);
-      await next();
       return response;
     }
   });
@@ -130,9 +124,7 @@ async function transformInterceptorExample() {
   const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
 
   api.addResponseInterceptor({
-    handler: async (response, next) => {
-      await next();
-      
+    handler: async (response) => {
       // Add metadata to all responses
       if (response.ok) {
         const data = await response.json();
@@ -251,25 +243,23 @@ async function retryWithMessagesExample() {
   let retryCount = 0;
 
   api.addRequestInterceptor({
-    handler: async (request, next) => {
+    handler: async (request) => {
       if (retryCount > 0) {
         console.log(`Retry attempt #${retryCount}`);
       }
       retryCount++;
-      await next();
       return request;
     }
   });
 
   api.addResponseInterceptor({
-    handler: async (response, next) => {
+    handler: async (response) => {
       if (!response.ok) {
         console.log(`Request failed with status ${response.status}`);
       } else {
         console.log('Request succeeded');
         retryCount = 0;
       }
-      await next();
       return response;
     }
   });
@@ -314,7 +304,7 @@ async function cachingInterceptorExample() {
   const cache = new SimpleCache();
 
   api.addRequestInterceptor({
-    handler: async (request, next) => {
+    handler: async (request) => {
       if (request.method === 'GET') {
         const cached = cache.get(request.url);
         if (cached) {
@@ -322,19 +312,17 @@ async function cachingInterceptorExample() {
           // Return cached response (would need to create Response object)
         }
       }
-      await next();
       return request;
     }
   });
 
   api.addResponseInterceptor({
-    handler: async (response, next) => {
+    handler: async (response) => {
       if (response.ok && response.url) {
         const data = await response.clone().json();
         cache.set(response.url, data);
         console.log('Cached response for:', response.url);
       }
-      await next();
       return response;
     }
   });
@@ -351,15 +339,13 @@ async function cachingInterceptorExample() {
 }
 
 // Run examples
-if (require.main === module) {
-  (async () => {
-    await loggingInterceptorExample();
-    await timestampInterceptorExample();
-    await analyticsInterceptorExample();
-    await transformInterceptorExample();
-    await errorHandlingExample();
-    await globalErrorHandlerExample();
-    await retryWithMessagesExample();
-    await cachingInterceptorExample();
-  })();
-}
+(async () => {
+  await loggingInterceptorExample();
+  await timestampInterceptorExample();
+  await analyticsInterceptorExample();
+  await transformInterceptorExample();
+  await errorHandlingExample();
+  await globalErrorHandlerExample();
+  await retryWithMessagesExample();
+  await cachingInterceptorExample();
+})();

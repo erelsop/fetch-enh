@@ -868,9 +868,15 @@ class FetchEnh {
     }
   }
 
+  /**
+   * Replaces the retry classifier, backoff strategy, and (optionally) the retry config
+   * in a single call. Pass `null` for `classifier` or `backoff` to revert that component
+   * to its built-in default — consistent with the granular `setRetryClassifier(null)` /
+   * `setBackoffStrategy(null)` setters.
+   */
   setRetryBehavior(
-    classifier: RetryClassifier,
-    backoff: BackoffStrategy,
+    classifier: RetryClassifier | null,
+    backoff: BackoffStrategy | null,
     config?: RetryConfig
   ): void {
     this._retryClassifier = classifier;

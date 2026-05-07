@@ -7,7 +7,7 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 - Automatic retries with backoff and jitter (with `Retry-After` support and a per-call retry override)
 - Authentication strategies: Bearer (with refresh), API Key (header or query), Basic (UTF‑8 safe), CSRF, OAuth2 client-credentials (Node) and OAuth2 + PKCE (browser)
 - Cross-origin credential stripping on redirect (`Authorization`, `Cookie`, `Cookie2`, `Proxy-Authorization`)
-- Request/response interceptors with priority ordering and onion-model composition
+- Request/response interceptors with priority ordering in a forward pipeline (lower `priority` numbers run first; `next()` is a no-op kept for API compatibility)
 - Timeouts and `AbortController` support, both global and per-request
 - Response parsing (`auto` content-type sniffing or explicit types) with 204/205 handled as `null`
 - Pagination — page/`pageSize` and cursor / `Link` header — exposed as both buffered (`get()`) and streaming (`getIter()`) variants
