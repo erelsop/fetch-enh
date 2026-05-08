@@ -19,10 +19,11 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 ## Installation
 
 ```bash
-git clone https://github.com/erelsop/fetch-enh.git
-cd fetch-enh
-npm install
-npm run build        # emits both CJS (dist/) and ESM (dist/esm/)
+npm install fetch-enh
+# or
+yarn add fetch-enh
+# or
+pnpm add fetch-enh
 ```
 
 The package ships a dual build:
@@ -337,7 +338,20 @@ await api.get({ endpoint: '/slow', options: { timeout: 5000, signal: c.signal } 
 
 ## Contributing
 
-PRs welcome.
+PRs welcome. To work on FetchEnh locally:
+
+```bash
+git clone https://github.com/erelsop/fetch-enh.git
+cd fetch-enh
+npm install
+npm run build        # emits both CJS (dist/) and ESM (dist/esm/)
+npm test             # 245 tests across 10 suites
+npm run test:coverage
+```
+
+The codebase targets Node ≥ 20. CI runs on Node 20 + 22 (Linux) with Node 22
+spot-checks on macOS and Windows. Both CJS and ESM artifacts are smoke-tested
+against a real `http.createServer` on every run.
 
 ## License
 
