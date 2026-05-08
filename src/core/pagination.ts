@@ -1,23 +1,35 @@
 import type { RequestParameters, QueryValue, ResponseType } from '../types/requestParameters';
 import type { PaginateOptions } from '../types/httpMethodOptions';
 import type { RequestOptions } from '../types/requestOptions';
+import { UnsupportedResponseTypeError } from '../errors/fetchErrors';
 
 export function parseLinkHeaderForNextCursor(headers: Headers, cursorParamName: string): string | null {
-  const link = headers.get('link') || headers.get('Link');
+  const link = headers.get('link'); // Headers.get() is case-insensitive per Fetch spec
   if (!link) return null;
-  const parts = link.split(',');
-  for (const p of parts) {
-    const section = p.trim();
-    const m = section.match(/<([^>]+)>;\s*rel="([^"]+)"/i);
-    if (m && m[2] === 'next') {
-      try {
-        // Use a placeholder base so both absolute and relative Link URLs work.
-        const url = new URL(m[1], 'https://placeholder.invalid');
-        const cur = url.searchParams.get(cursorParamName) || url.searchParams.get('page');
-        return cur || null;
-      } catch {
-        return null;
+  for (const section of link.split(',')) {
+    const trimmed = section.trim();
+    const urlMatch = trimmed.match(/^<([^>]+)>/);
+    if (!urlMatch) continue;
+    const params = trimmed.slice(urlMatch[0].length).split(';').slice(1);
+    let rels: string[] | null = null;
+    for (const p of params) {
+      const eq = p.indexOf('=');
+      if (eq < 0) continue;
+      const name = p.slice(0, eq).trim().toLowerCase();
+      let value = p.slice(eq + 1).trim();
+      if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+      if (name === 'rel') {
+        rels = value.split(/\s+/);
+        break;
       }
+    }
+    if (!rels?.includes('next')) continue;
+    try {
+      // Use a placeholder base so both absolute and relative Link URLs work.
+      const url = new URL(urlMatch[1], 'https://placeholder.invalid');
+      return url.searchParams.get(cursorParamName) || url.searchParams.get('page') || null;
+    } catch {
+      return null;
     }
   }
   return null;
@@ -80,6 +92,14 @@ export async function* paginateIter<T = any>(
     extractor,
     options: callOptions,
   } = options;
+
+  // Pagination only works for JSON responses. Fail fast rather than silently
+  // yielding zero pages, which would be indistinguishable from an empty result.
+  if (responseType !== 'json') {
+    throw new UnsupportedResponseTypeError(
+      `paginateIter requires responseType: 'json' (received: '${responseType}')`
+    );
+  }
 
   // Create an internal AbortController that fires when the generator is closed
   // early (break / return / throw inside a for-await loop). This cancels the
@@ -202,6 +222,17 @@ export async function* paginateCursorIter<T = any>(
     options: perCallOptions,
   } = params;
 
+  // Pagination only works for JSON responses regardless of which cursor
+  // strategy (`useLinkHeader`, `getNextCursor`, or plain) is in use. Fail
+  // fast at function entry rather than letting the `useLinkHeader ||
+  // getNextCursor` branch surface a confusing `SyntaxError` from
+  // `res.clone().json()` further down the loop.
+  if (responseType !== 'json') {
+    throw new UnsupportedResponseTypeError(
+      `paginateCursorIter requires responseType: 'json' (received: '${responseType}')`
+    );
+  }
+
   // Create an internal AbortController that fires when the generator is closed
   // early (break / return / throw inside a for-await loop).
   const internalController = new AbortController();
@@ -230,6 +261,11 @@ export async function* paginateCursorIter<T = any>(
       };
 
       if (useLinkHeader || getNextCursor) {
+        // The Headers-aware branches must request the raw `Response` so we
+        // can read the `Link` header (or hand it to `getNextCursor`). The
+        // upfront `responseType !== 'json'` guard above already ensures the
+        // user opted into JSON parsing; passing `responseType: 'response'`
+        // here is purely an internal implementation detail.
         const res = await requestFn({
           endpoint,
           method: 'GET',
@@ -252,9 +288,7 @@ export async function* paginateCursorIter<T = any>(
           responseType,
           options: perCallOpts,
         });
-        if (responseType === 'json') {
-          pageItems = (Array.isArray(resp) ? resp : (extractor ? extractor(resp) : [])) as T[];
-        }
+        pageItems = (Array.isArray(resp) ? resp : (extractor ? extractor(resp) : [])) as T[];
       }
 
       if (!Array.isArray(pageItems) || pageItems.length === 0) break;

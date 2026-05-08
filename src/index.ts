@@ -182,9 +182,12 @@ class FetchEnh {
 
     const effectiveRetryConfig = callRetryConfig ?? this._retryConfig;
 
-    // NOTE: The timeout budget begins here, before request interceptors and auth
-    // strategies execute. Slow interceptors consume timeout before the actual
-    // network call. Keep interceptors fast or increase the timeout accordingly.
+    // NOTE: The timeout budget begins here, before auth strategies execute on
+    // each attempt. Slow auth strategies consume timeout before the actual
+    // network call. Keep auth strategies fast or increase the timeout
+    // accordingly. (Request interceptors run once per logical call inside
+    // `_request` — outside this timeout window — so a slow interceptor does
+    // *not* consume the per-attempt budget.)
     const controller = new AbortController();
     let timedOut = false;
     const timeoutId = timeout > 0 ? setTimeout(
@@ -219,6 +222,14 @@ class FetchEnh {
 
       // Apply response interceptors
       const interceptedResponse = await this._applyResponseInterceptors(response);
+
+      // 304 Not Modified carries no message body (RFC 9110 §15.4.5) but is a
+      // valid, non-error response for conditional GET requests. Route it to
+      // parseBody (which returns null for it) instead of the !ok error path.
+      if (interceptedResponse.status === 304) {
+        if (this._onComplete) this._onComplete({ method, url: request.url, status: 304, ok: true, attempts: attempt, elapsedMs: Date.now() - startTime });
+        return parseBody(interceptedResponse, responseType);
+      }
 
       if (!interceptedResponse.ok) {
         const allowRetry = isRetryAllowed(method, effectiveRetryConfig, retryCtx);
@@ -438,9 +449,10 @@ class FetchEnh {
     }
 
     const bodyReplayable = isReplayableBody(body);
+    const isStream = typeof ReadableStream !== 'undefined' && body instanceof ReadableStream;
     if (!bodyReplayable && retries > 0) {
       console.warn(
-        `[FetchEnh] Non-replayable body (ReadableStream) detected with retries=${retries}. ` +
+        `[FetchEnh] Non-replayable body${isStream ? ' (ReadableStream)' : ''} detected with retries=${retries}. ` +
         'Retries will be skipped for this request. Provide a `bodyFactory` option to enable retries.'
       );
     }
@@ -762,8 +774,11 @@ class FetchEnh {
    * on cross-origin hops in both the default and `applyMiddleware: true` paths.
    *
    * Pass `{ applyMiddleware: true }` to opt back in to request interceptors, auth
-   * strategies, and response interceptors — without the full timeout/retry scaffolding
-   * of a normal `_request` call. This is useful when you need auth headers applied to a
+   * strategies (including the `onAuthError` half of the contract — 401/403 responses
+   * are routed through every registered strategy's `onAuthError` handler so that
+   * token-refresh strategies like {@link BearerTokenAuth} fire as expected), and
+   * response interceptors — without the full timeout/retry scaffolding of a normal
+   * `_request` call. This is useful when you need auth headers applied to a
    * one-shot request but do not want automatic retries.
    *
    * Pass `{ signal }` to provide an `AbortSignal` that cancels the underlying request.
@@ -803,13 +818,43 @@ class FetchEnh {
     if (applyMiddleware) {
       request = await this._applyRequestInterceptors(request);
       request = await this._auth.applyAuthOnRequest(request);
-      const response = await safeFetch(request.url, {
+      const initialResponse = await safeFetch(request.url, {
         method: request.method,
         headers: request.headers,
         body: serializedBody,
         signal,
       });
-      return this._applyResponseInterceptors(response);
+
+      // Honour the `onAuthError` half of the AuthStrategy contract — the
+      // `applyMiddleware: true` path used to fire `applyAuthOnRequest` only,
+      // which silently disabled token-refresh strategies (BearerTokenAuth,
+      // OAuth2*) for any consumer routing one-shot calls through `raw()` with
+      // an expired token. Mirrors the 401/403 handling in `_fetchAndParse`.
+      // Note: `raw()` deliberately skips the timeout/retry scaffolding, so we
+      // pass `signal` straight through without wrapping it in a fresh
+      // `AbortController` — cancellation is the caller's responsibility.
+      if (initialResponse.status === 401 || initialResponse.status === 403) {
+        const authRetryFn = async (newReq: Request): Promise<Response> =>
+          safeFetch(newReq.url, {
+            method: newReq.method,
+            headers: newReq.headers as any,
+            body: serializedBody,
+            signal,
+          });
+        const authResult = await this._auth.handleAuthError(
+          request,
+          initialResponse,
+          authRetryFn,
+        );
+        if (authResult instanceof Response) {
+          return this._applyResponseInterceptors(authResult);
+        }
+        if (authResult === false) {
+          throw new AuthAbortError('Auth strategy halted after auth error.');
+        }
+      }
+
+      return this._applyResponseInterceptors(initialResponse);
     }
 
     return safeFetch(request.url, {

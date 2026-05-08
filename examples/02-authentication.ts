@@ -8,6 +8,7 @@ import FetchEnh, {
   BearerTokenAuth, 
   ApiKeyAuth, 
   BasicAuth, 
+  CsrfTokenAuth,
   MemoryTokenStore,
   LocalStorageTokenStore 
 } from 'fetch-enh';
@@ -210,6 +211,40 @@ async function customTokenStoreExample() {
   }
 }
 
+// Example 8: CSRF Token Authentication
+async function csrfTokenExample() {
+  console.log('\n=== CSRF Token Authentication ===\n');
+
+  const api = new FetchEnh({ baseURL: 'https://jsonplaceholder.typicode.com' });
+
+  // Configure CSRF token authentication.
+  // The first argument is the request header name; the second is an async
+  // (or sync) callback that returns the current token or null.
+  api.useAuthStrategy(new CsrfTokenAuth(
+    'X-CSRF-Token',
+    async () => {
+      // In a browser you'd typically read the token from a meta tag:
+      //   document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      //
+      // In Node.js you might fetch it from a dedicated endpoint; here we
+      // return a placeholder value because jsonplaceholder doesn't issue
+      // CSRF tokens.  Replace with your server's actual token source.
+      return 'csrf-token-placeholder';
+    }
+  ));
+
+  try {
+    // The CSRF token is attached as the X-CSRF-Token header on every request.
+    const data = await api.post({
+      endpoint: '/posts',
+      body: { title: 'CSRF-protected post', body: 'Content', userId: 1 }
+    });
+    console.log('Created with CSRF protection:', data);
+  } catch (error) {
+    console.error('Request failed:', error);
+  }
+}
+
 // Helper functions (mock implementations)
 function getRefreshTokenFromStorage(): string {
   return 'refresh-token-from-storage';
@@ -244,4 +279,5 @@ async function deleteTokenFromDatabase(): Promise<void> {
   await multipleAuthExample();
   await persistentTokenExample();
   await customTokenStoreExample();
+  await csrfTokenExample();
 })();

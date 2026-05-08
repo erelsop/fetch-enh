@@ -128,10 +128,12 @@ export function computeDelay(
   response?: Response,
   error?: unknown
 ): number {
-  if (backoffStrategy) {
-    return backoffStrategy.computeDelay({ attempt, response, error });
-  }
-  return defaultBackoffDelay(attempt, retryConfig, response);
+  const raw = backoffStrategy
+    ? backoffStrategy.computeDelay({ attempt, response, error })
+    : defaultBackoffDelay(attempt, retryConfig, response);
+  // Guard against NaN, Infinity, and negative values from user-supplied strategies.
+  // raw === 0 is preserved (intentional "retry immediately, no delay").
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
 }
 
 /**

@@ -9,7 +9,7 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 - Cross-origin credential stripping on redirect (`Authorization`, `Cookie`, `Cookie2`, `Proxy-Authorization`)
 - Request/response interceptors with priority ordering in a forward pipeline (lower `priority` numbers run first; `next()` is a no-op kept for API compatibility)
 - Timeouts and `AbortController` support, both global and per-request
-- Response parsing (`auto` content-type sniffing or explicit types) with 204/205 handled as `null`
+- Response parsing (`auto` content-type sniffing or explicit types) with 204/205/304 handled as `null`
 - Pagination — page/`pageSize` and cursor / `Link` header — exposed as both buffered (`get()`) and streaming (`getIter()`) variants
 - Structured errors with `toJSON()` (`FetchError`, `RetryError`, `TimeoutError`, `UnsupportedResponseTypeError`, `InterceptorAbortError`, `AuthAbortError`)
 - TypeScript-first API with `readonly` types and bounded `QueryValue` typing; works in browsers and Node.js (≥ 20)
@@ -19,8 +19,8 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 ## Installation
 
 ```bash
-git clone https://github.com/erelsop/FetchEnh.git
-cd FetchEnh
+git clone https://github.com/erelsop/fetch-enh.git
+cd fetch-enh
 npm install
 npm run build        # emits both CJS (dist/) and ESM (dist/esm/)
 ```
@@ -81,9 +81,9 @@ new FetchEnh({
 - `get/post/put/patch/delete({ endpoint, headers?, query?, body?, responseType?, options?, bodyFactory? })`
 - `head({ endpoint, headers?, query? })` → `Promise<Response>` (always returns the raw `Response`; HEAD has no body)
 - `getIter({ ... })` → `AsyncGenerator<T[]>` — streaming variant of `get()` that yields one page at a time (see [Pagination](#pagination))
-- `raw({ endpoint, method?, headers?, body?, query?, applyMiddleware? })` → `Promise<Response>`
+- `raw({ endpoint, method?, headers?, body?, query?, applyMiddleware?, signal? })` → `Promise<Response>`
   - By default, `raw()` skips all interceptors, auth, timeouts, and retries. Cross-origin redirects are still handled safely — sensitive headers (`Authorization`, `Cookie`, etc.) are stripped on cross-origin hops.
-  - Pass `applyMiddleware: true` to apply request interceptors, auth strategies, and response interceptors while still skipping timeout and retry scaffolding.
+  - Pass `applyMiddleware: true` to apply request interceptors, auth strategies (the **full** `AuthStrategy` contract — `onRequest` *and* `onAuthError`, so token-refresh strategies like `BearerTokenAuth` fire on 401/403), and response interceptors. Timeout and retry scaffolding are still skipped.
   - Pass `signal` to provide an `AbortSignal` that cancels the underlying request.
 - `addRequestInterceptor` / `removeRequestInterceptor` / `clearRequestInterceptors`
 - `addResponseInterceptor` / `removeResponseInterceptor` / `clearResponseInterceptors`
@@ -345,6 +345,6 @@ MIT
 
 ## Links
 
-- Repository: https://github.com/erelsop/FetchEnh
-- Issues: https://github.com/erelsop/FetchEnh/issues
+- Repository: https://github.com/erelsop/fetch-enh
+- Issues: https://github.com/erelsop/fetch-enh/issues
 - Examples: ./examples

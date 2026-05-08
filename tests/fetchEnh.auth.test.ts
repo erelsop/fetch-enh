@@ -202,6 +202,60 @@ describe('Authentication Strategies', () => {
       const headers = fetchMock.mock.calls[0][1]?.headers as any;
       expect(headers.has('Authorization')).toBe(false);
     });
+
+    test('raw({ applyMiddleware: true }) engages onAuthError on 401', async () => {
+      const store = new MemoryTokenStore('stale-token');
+      const refresh = jest.fn(async () => 'fresh-token');
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      api.useAuthStrategy(new BearerTokenAuth(store, refresh));
+
+      fetchMock
+        .mockResponseOnce('Unauthorized', { status: 401 })
+        .mockResponseOnce(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+
+      const res = await api.raw({ endpoint: '/protected', applyMiddleware: true });
+
+      expect(res.status).toBe(200);
+      // Refresh callback fired exactly once on the 401.
+      expect(refresh).toHaveBeenCalledTimes(1);
+      // Store reflects the refreshed token.
+      expect(store.getToken()).toBe('fresh-token');
+      // Two server hits: dead token, then refreshed token.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const firstHeaders = fetchMock.mock.calls[0][1]?.headers as any;
+      const secondHeaders = fetchMock.mock.calls[1][1]?.headers as any;
+      const firstAuth = firstHeaders.get?.('Authorization') ?? firstHeaders.Authorization;
+      const secondAuth = secondHeaders.get?.('Authorization') ?? secondHeaders.Authorization;
+      expect(firstAuth).toBe('Bearer stale-token');
+      expect(secondAuth).toBe('Bearer fresh-token');
+    });
+
+    test('raw({ applyMiddleware: true }) returns 401 unchanged when no auth strategies are registered', async () => {
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      fetchMock.mockResponseOnce('Unauthorized', { status: 401 });
+
+      const res = await api.raw({ endpoint: '/protected', applyMiddleware: true });
+      expect(res.status).toBe(401);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('raw({ applyMiddleware: false }) does NOT engage onAuthError (default escape-hatch)', async () => {
+      const store = new MemoryTokenStore('stale-token');
+      const refresh = jest.fn(async () => 'fresh-token');
+      const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+      api.useAuthStrategy(new BearerTokenAuth(store, refresh));
+
+      fetchMock.mockResponseOnce('Unauthorized', { status: 401 });
+
+      const res = await api.raw({ endpoint: '/protected' });
+      expect(res.status).toBe(401);
+      // Default raw() bypasses every middleware — refresh must NOT fire.
+      expect(refresh).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('ApiKeyAuth', () => {

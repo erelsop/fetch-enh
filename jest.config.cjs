@@ -26,5 +26,21 @@ module.exports = {
       lines: 90,
       statements: 90,
     },
+    // Per-file floors prevent the global aggregate from masking regressions
+    // in production-critical orchestration files. Numbers are pinned just
+    // below the *current* per-file coverage so a future drop is surfaced
+    // even when the global aggregate still passes.
+    './src/index.ts': {
+      branches: 80,
+      functions: 65,
+      lines: 90,
+      statements: 90,
+    },
+    './src/auth/strategies.ts': {
+      branches: 65,
+      functions: 85,
+      lines: 90,
+      statements: 90,
+    },
   },
 };

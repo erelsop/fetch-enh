@@ -82,3 +82,30 @@ test('OAuth2 PKCE-style using provided token/refresh functions', async () => {
   const h2 = fetchMock.mock.calls[2][1]?.headers as any;
   expect(h2.get('Authorization')).toBe('Bearer a2');
 });
+
+test('OAuth2PKCEAuth: refresh failure clears refresh store and falls through to acquire', async () => {
+  const accessStore = new MemoryTokenStore('stale-access-token');
+  const refreshStore = new MemoryTokenStore('dead-refresh-token');
+  const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+
+  const getAccessToken = jest.fn().mockResolvedValue({ access_token: 'a-fresh', expires_in: 5 });
+  const refreshWithRefreshToken = jest.fn().mockRejectedValue(new Error('invalid_grant'));
+
+  api.useAuthStrategy(new OAuth2PKCEAuth({
+    tokenStore: accessStore,
+    refreshTokenStore: refreshStore,
+    getAccessToken,
+    refreshWithRefreshToken,
+  }));
+
+  // 401 → onAuthError → refresh() → refreshWithRefreshToken throws → clears store → acquire() → 200
+  fetchMock
+    .mockResponseOnce('', { status: 401 })
+    .mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  const out = await api.get({ endpoint: '/x' });
+  expect(out).toEqual({ ok: true });
+  expect(refreshWithRefreshToken).toHaveBeenCalledTimes(1);
+  expect(getAccessToken).toHaveBeenCalledTimes(1);   // fall-through to acquire() fired
+  expect(refreshStore.getToken()).toBeNull();          // dead refresh token cleared
+});

@@ -191,10 +191,9 @@ test('FetchError.status is 404 for GET /not-found', async () => {
   expect(caughtError!.status).toBe(404);
 });
 
-// Q-5 regression: getIter should cancel the in-flight page-2 request when the
-// caller's AbortSignal fires.  This exercises the composeSignals() helper that
-// delegates to AbortSignal.any() — the branch that had no test coverage after
-// the P-7 polyfill removal.
+// getIter should cancel the in-flight page-2 request when the caller's
+// AbortSignal fires. This exercises the composeSignals() helper that
+// delegates to AbortSignal.any().
 test('getIter with user signal: aborting mid-iteration cancels the in-flight request', async () => {
   const api = new FetchEnh({ baseURL, defaultRetries: 0 });
   const controller = new AbortController();
@@ -226,10 +225,10 @@ test('getIter with user signal: aborting mid-iteration cancels the in-flight req
   expect(caughtError!.name).toBe('AbortError');
 }, 15_000);
 
-// P-5 regression tests: raw() with a body must work on real (undici) fetch.
-// Before the P-1 fix these threw "RequestInit: duplex option is required when
-// sending a body" on Node ≥18 because request.body (a ReadableStream) was
-// being extracted into the safeFetch init object.
+// raw() with a body must work on real (undici) fetch. Earlier versions threw
+// "RequestInit: duplex option is required when sending a body" on Node ≥ 18
+// because request.body (a ReadableStream) was being extracted into the
+// safeFetch init object — the pre-serialisation path now sidesteps that.
 test('raw() with body POSTs correctly against real fetch', async () => {
   const api = new FetchEnh({ baseURL, defaultRetries: 0 });
   const res = await api.raw({

@@ -9,6 +9,8 @@ import { MemoryTokenStore } from '../src/auth/tokenStores';
 import { defaultBackoffDelay } from '../src/core/retryEngine';
 import type { RetryConfig } from '../src/types/retry';
 import fetchMock from 'jest-fetch-mock';
+import { parseLinkHeaderForNextCursor } from '../src/core/pagination';
+import { UnsupportedResponseTypeError } from '../src/errors/fetchErrors';
 
 beforeEach(() => {
   fetchMock.resetMocks();
@@ -470,5 +472,87 @@ describe('getIter cursor-based pagination branch', () => {
     const allItems = pages.flat();
     expect(allItems).toHaveLength(2);
     expect(allItems).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+});
+
+describe('parseLinkHeaderForNextCursor handles RFC 8288 spec-legal forms', () => {
+  test('standard quoted rel="next" is parsed', () => {
+    const headers = new Headers({ link: '<https://api.test/items?cursor=abc>; rel="next"' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBe('abc');
+  });
+
+  test('multi-value rel="next prev" is recognised', () => {
+    const headers = new Headers({ link: '<https://api.test/items?cursor=def>; rel="next prev"' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBe('def');
+  });
+
+  test('unquoted rel=next token is recognised', () => {
+    const headers = new Headers({ link: '<https://api.test/items?cursor=ghi>; rel=next' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBe('ghi');
+  });
+
+  test('rel after another param is recognised', () => {
+    const headers = new Headers({ link: '<https://api.test/items?cursor=jkl>; type="text/html"; rel="next"' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBe('jkl');
+  });
+
+  test('returns null when rel is only "prev" (no next)', () => {
+    const headers = new Headers({ link: '<https://api.test/items?cursor=mno>; rel="prev"' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBeNull();
+  });
+
+  test('falls back to page param when cursorParamName not found', () => {
+    const headers = new Headers({ link: '<https://api.test/items?page=3>; rel="next"' });
+    expect(parseLinkHeaderForNextCursor(headers, 'cursor')).toBe('3');
+  });
+});
+
+describe('paginateIter throws for non-JSON responseType', () => {
+  test('throws UnsupportedResponseTypeError when responseType is text', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('hello', { status: 200, headers: { 'content-type': 'text/plain' } });
+
+    const iter = api.getIter({ endpoint: '/data', responseType: 'text', page: 1, pageSize: 10 });
+    // Pin both the error class and the message.
+    await expect(iter.next()).rejects.toThrow(UnsupportedResponseTypeError);
+    await expect(
+      api.getIter({ endpoint: '/data', responseType: 'text', page: 1, pageSize: 10 }).next()
+    ).rejects.toThrow("paginateIter requires responseType: 'json'");
+  });
+});
+
+describe('paginateCursorIter throws for non-JSON responseType', () => {
+  test('plain cursor without useLinkHeader/getNextCursor throws UnsupportedResponseTypeError', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    // No fetch is expected — the throw happens at generator entry.
+    const iter = api.getIter({
+      endpoint: '/data',
+      cursor: null,
+      responseType: 'text',
+    });
+    await expect(iter.next()).rejects.toThrow(UnsupportedResponseTypeError);
+    await expect(
+      api.getIter({ endpoint: '/data', cursor: null, responseType: 'text' }).next()
+    ).rejects.toThrow("paginateCursorIter requires responseType: 'json'");
+  });
+
+  test('useLinkHeader: true with responseType: text throws UnsupportedResponseTypeError', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    const iter = api.getIter({
+      endpoint: '/data',
+      responseType: 'text',
+      useLinkHeader: true,
+    });
+    await expect(iter.next()).rejects.toThrow(UnsupportedResponseTypeError);
+  });
+
+  test('getNextCursor with responseType: text throws UnsupportedResponseTypeError', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    const iter = api.getIter({
+      endpoint: '/data',
+      responseType: 'text',
+      getNextCursor: () => null,
+    });
+    await expect(iter.next()).rejects.toThrow(UnsupportedResponseTypeError);
   });
 });

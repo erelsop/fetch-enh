@@ -78,7 +78,14 @@ export interface RawOptions {
   readonly headers?: Record<string, string>;
   readonly query?: Record<string, QueryValue>;
   readonly bodyFactory?: () => BodyType;
-  /** When `true`, request interceptors, auth strategies, and response interceptors are applied before/after the fetch. Defaults to `false`. */
+  /**
+   * When `true`, request interceptors, auth strategies, and response
+   * interceptors are applied before/after the fetch. Auth strategies
+   * participate via the **full** `AuthStrategy` contract — both
+   * `onRequest` (token attachment) and `onAuthError` (401/403 refresh) —
+   * so token-refresh strategies like `BearerTokenAuth` fire as expected.
+   * Timeout and retry scaffolding remain disabled. Defaults to `false`.
+   */
   readonly applyMiddleware?: boolean;
   /** Optional AbortSignal to cancel the raw request. */
   readonly signal?: AbortSignal;

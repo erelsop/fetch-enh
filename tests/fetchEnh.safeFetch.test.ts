@@ -211,4 +211,43 @@ describe('safeFetch redirect handling', () => {
     expect(res.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  // body-framing headers must be stripped when switching to GET
+  test('POST→GET switch on 303 strips Content-Type and Content-Length headers', async () => {
+    fetchMock
+      .mockResponseOnce('', { status: 303, headers: { location: 'https://api.test/final' } })
+      .mockResponseOnce(JSON.stringify({ done: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    const initHeaders = new Headers({
+      'Content-Type': 'application/json',
+      'Content-Length': '42',
+      'Transfer-Encoding': 'chunked',
+    });
+
+    await safeFetch('https://api.test/submit', {
+      method: 'POST',
+      headers: initHeaders,
+      body: JSON.stringify({ x: 1 }),
+    });
+
+    const redirectedInit = fetchMock.mock.calls[1][1] as RequestInit;
+    const redirectedHeaders = redirectedInit.headers as Headers;
+    expect(redirectedInit.method).toBe('GET');
+    expect(redirectedHeaders.has('content-type')).toBe(false);
+    expect(redirectedHeaders.has('content-length')).toBe(false);
+    expect(redirectedHeaders.has('transfer-encoding')).toBe(false);
+  });
+
+  test('POST→GET switch on 301 strips body-framing headers', async () => {
+    fetchMock
+      .mockResponseOnce('', { status: 301, headers: { location: 'https://api.test/moved' } })
+      .mockResponseOnce('{}', { status: 200 });
+
+    const initHeaders = new Headers({ 'Content-Type': 'application/json', 'Content-Length': '10' });
+    await safeFetch('https://api.test/original', { method: 'POST', headers: initHeaders, body: '{"x":1}' });
+
+    const redirectedHeaders = fetchMock.mock.calls[1][1]?.headers as Headers;
+    expect(redirectedHeaders.has('content-type')).toBe(false);
+    expect(redirectedHeaders.has('content-length')).toBe(false);
+  });
 });

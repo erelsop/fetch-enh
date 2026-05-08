@@ -43,6 +43,15 @@ Request/Response interceptors and error handling:
 - Retry with custom messages
 - Request/Response caching
 
+### 05-new-features.ts
+Advanced TypeScript features and request control:
+- Generic TypeScript support (type-safe `get<T>()`, `post<T>()`, etc.)
+- Complex generic types (`Slice<T>`, nested generics)
+- AbortController support (per-request cancellation and shared controller across multiple requests)
+- Enhanced type exports (`RetryClassifier`, `BackoffStrategy`)
+- Custom retry strategies with typed classifier and backoff
+- Type-safe error handling
+
 ## Running the Examples
 
 ### Prerequisites
@@ -50,7 +59,7 @@ Request/Response interceptors and error handling:
 Ensure you have built the project:
 
 ```bash
-cd /path/to/FetchEnh
+cd /path/to/fetch-enh
 npm install
 npm run build
 ```
@@ -84,7 +93,7 @@ node examples/compiled/01-basic-usage.js
 import FetchEnh from 'fetch-enh';
 
 const api = new FetchEnh({
-  baseURL: 'https://api.example.com',
+  baseURL: 'https://jsonplaceholder.typicode.com',
   defaultHeaders: {
     'Content-Type': 'application/json',
     'X-Client-Version': '1.0.0'
@@ -160,4 +169,4 @@ try {
 
 - [Main README](../README.md)
 - [API Documentation](../README.md#-api-documentation)
-- [GitHub Repository](https://github.com/erelsop/FetchEnh)
+- [GitHub Repository](https://github.com/erelsop/fetch-enh)

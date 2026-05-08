@@ -60,8 +60,4 @@ export class AuthPipeline {
     const idx = this._authStrategies.indexOf(strategy);
     if (idx !== -1) this._authStrategies.splice(idx, 1);
   }
-
-  get strategies(): readonly AuthStrategy[] {
-    return this._authStrategies;
-  }
 }

@@ -1,4 +1,5 @@
 import type { AuthStrategy, TokenStore } from '../types/auth';
+import { safeFetch } from '../core/requestBuilder';
 
 export class ApiKeyAuth implements AuthStrategy {
   priority?: number | undefined;
@@ -110,8 +111,8 @@ export class BearerTokenAuth implements AuthStrategy {
     // Deduplicate refresh attempts
     if (!this.refreshingPromise) {
       this.refreshingPromise = this.refresh()
-        .then((newToken) => {
-          this.store.setToken(newToken ?? null);
+        .then(async (newToken) => {
+          await this.store.setToken(newToken ?? null);
           return newToken ?? null;
         })
         .finally(() => {
@@ -147,6 +148,18 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
   private refreshingPromise: Promise<string | null> | null = null;
   private expiresAt: number | null = null;
 
+  /**
+   * @param params - Configuration for the Client Credentials grant strategy.
+   *
+   * **Note on cached-token expiry:** When this strategy is constructed with a
+   * non-empty `tokenStore` (e.g. a shared `MemoryTokenStore` or a
+   * `LocalStorageTokenStore` with a persisted token from a previous session),
+   * `expiresAt` is initialised to `null` because the strategy does not know
+   * the cached token's absolute expiry time. The cached token is treated as
+   * fresh until a 401 response triggers a forced refresh. This is correct
+   * behaviour — it costs one extra 401-then-refresh round trip on startup but
+   * requires no persistent expiry metadata on the store side.
+   */
   constructor(params: { tokenURL: string; clientId: string; clientSecret: string; scope?: string | string[]; tokenStore: TokenStore; priority?: number; fetchFn?: typeof fetch }) {
     // Detect a genuine browser context: `window` is defined but there is no Node.js process.
     // This intentionally does NOT fire in jsdom / test environments (Node.js + window).
@@ -170,7 +183,12 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
 
   private isExpiredSoon(): boolean {
     if (!this.expiresAt) return false;
-    return Date.now() >= this.expiresAt - 60_000; // refresh 60s early
+    const now = Date.now();
+    const ttlMs = this.expiresAt - now;
+    // Refresh 60 s early for typical tokens, but never more than half the remaining TTL
+    // (prevents immediate re-fetch for short-lived tokens where expires_in < 60).
+    const buffer = Math.min(60_000, Math.max(0, ttlMs / 2));
+    return now >= this.expiresAt - buffer;
   }
 
   private async fetchToken(): Promise<string | null> {
@@ -180,11 +198,21 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
     body.set('client_secret', this.clientSecret);
     if (this.scope) body.set('scope', this.scope);
 
-    const res = await this.fetchFn(this.tokenURL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
+    // Route the token-endpoint POST through safeFetch so that any redirects
+    // issued by a misbehaving (or misconfigured) IdP receive the same cross-
+    // origin credential-stripping and method-switch handling applied to every
+    // other outbound call in the library. `this.fetchFn` is forwarded as the
+    // underlying transport so test harnesses that inject a mock fetch keep
+    // working (jest-fetch-mock, undici, etc.).
+    const res = await safeFetch(
+      this.tokenURL,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      },
+      this.fetchFn,
+    );
     if (!res.ok) {
       const errorText = await res.text().catch(() => '');
       throw new Error(
@@ -200,7 +228,7 @@ export class OAuth2ClientCredentialsAuth implements AuthStrategy {
     }
     const token = json.access_token;
     this.expiresAt = json.expires_in ? (Date.now() + json.expires_in * 1000) : null;
-    this.store.setToken(token);
+    await this.store.setToken(token);
     return token;
   }
 
@@ -243,6 +271,14 @@ export class OAuth2PKCEAuth implements AuthStrategy {
   private refreshingPromise: Promise<string | null> | null = null;
   private expiresAt: number | null = null;
 
+  /**
+   * @param params - Configuration for the PKCE / authorisation-code grant strategy.
+   *
+   * **Note on cached-token expiry:** When this strategy is constructed with a
+   * non-empty `tokenStore`, `expiresAt` is initialised to `null` because the
+   * strategy does not know the cached token's absolute expiry time. The token
+   * is treated as fresh until a 401 response triggers a forced `acquire()`.
+   */
   constructor(params: { tokenStore: TokenStore; refreshTokenStore?: TokenStore; getAccessToken: () => Promise<OAuth2TokenResponse>; refreshWithRefreshToken?: (refreshToken: string) => Promise<OAuth2TokenResponse>; priority?: number }) {
     this.store = params.tokenStore;
     this.refreshStore = params.refreshTokenStore;
@@ -253,27 +289,50 @@ export class OAuth2PKCEAuth implements AuthStrategy {
 
   private isExpiredSoon(): boolean {
     if (!this.expiresAt) return false;
-    return Date.now() >= this.expiresAt - 60_000;
+    const now = Date.now();
+    const ttlMs = this.expiresAt - now;
+    // Refresh 60 s early for typical tokens, but never more than half the remaining TTL
+    // (prevents immediate re-fetch for short-lived tokens where expires_in < 60).
+    const buffer = Math.min(60_000, Math.max(0, ttlMs / 2));
+    return now >= this.expiresAt - buffer;
   }
 
   private async acquire(): Promise<string | null> {
     const res = await this.getAccessToken();
     const token = res.access_token || null;
     this.expiresAt = res.expires_in ? (Date.now() + res.expires_in * 1000) : null;
-    this.store.setToken(token);
-    if (this.refreshStore && res.refresh_token) this.refreshStore.setToken(res.refresh_token);
+    // Persist the refresh token *before* the access token so that an async
+    // refresh-store failure (e.g. IndexedDB quota exceeded, encrypted-store
+    // key rotation, network blip on a remote-backed store) cannot leave the
+    // pair half-written. If `refreshStore.setToken` rejects, the access
+    // token is never observed by the application and the strategy will
+    // re-acquire on the next request.
+    if (this.refreshStore && res.refresh_token) await this.refreshStore.setToken(res.refresh_token);
+    await this.store.setToken(token);
     return token;
   }
 
   private async refresh(): Promise<string | null> {
-    const refreshToken = this.refreshStore ? await Promise.resolve(this.refreshStore.getToken() as any) : null;
+    const refreshToken = this.refreshStore
+      ? await Promise.resolve(this.refreshStore.getToken() as any)
+      : null;
     if (!refreshToken || !this.refreshWithRefreshToken) return this.acquire();
-    const res = await this.refreshWithRefreshToken(refreshToken);
-    const token = res.access_token || null;
-    this.expiresAt = res.expires_in ? (Date.now() + res.expires_in * 1000) : null;
-    this.store.setToken(token);
-    if (this.refreshStore && res.refresh_token) this.refreshStore.setToken(res.refresh_token);
-    return token;
+
+    try {
+      const res = await this.refreshWithRefreshToken(refreshToken);
+      const token = res.access_token || null;
+      this.expiresAt = res.expires_in ? (Date.now() + res.expires_in * 1000) : null;
+      // Refresh token first, then access token, so a partial-write failure
+      // cannot leave the access token "newer" than the refresh token.
+      if (this.refreshStore && res.refresh_token) await this.refreshStore.setToken(res.refresh_token);
+      await this.store.setToken(token);
+      return token;
+    } catch {
+      // Refresh-token grant failed (e.g. RFC 6749 invalid_grant for a revoked token).
+      // Clear the dead refresh token and fall through to a fresh acquire().
+      if (this.refreshStore) await this.refreshStore.setToken(null);
+      return this.acquire();
+    }
   }
 
   private async ensureToken(): Promise<string | null> {

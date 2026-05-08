@@ -127,7 +127,11 @@ export function buildRequest(params: BuildRequestParams): Request {
   };
 
   let adjustedBody: BodyType | undefined = body;
-  if (body) {
+  // Use an explicit null/undefined check rather than truthy `if (body)` so
+  // that falsy JSON primitives (`false`, `0`, `''`) — all admitted by
+  // `BodyType ⊃ JsonValue ⊃ JsonPrimitive` — still get JSON-encoded with the
+  // matching `application/json` Content-Type.
+  if (body !== null && body !== undefined) {
     setContentTypeHeader(body, combinedHeaders);
     adjustedBody = serializeBody(body);
   }
@@ -165,6 +169,13 @@ const MAX_REDIRECTS = 20;
 export async function safeFetch(
   url: string,
   init: RequestInit,
+  /**
+   * Optional injection point so callers (e.g. OAuth2 strategies that accept a
+   * test-supplied `fetchFn`) can route their token-endpoint requests through
+   * the same redirect-safety scaffolding used by every other outbound call.
+   * Defaults to the global `fetch`.
+   */
+  fetchFn: typeof fetch = fetch,
 ): Promise<Response> {
   let currentUrl = url;
   let currentMethod = init.method ?? 'GET';
@@ -173,7 +184,7 @@ export async function safeFetch(
   const signal = init.signal;
 
   for (let hops = 0; hops <= MAX_REDIRECTS; hops++) {
-    const response = await fetch(currentUrl, {
+    const response = await fetchFn(currentUrl, {
       method: currentMethod,
       headers: currentHeaders,
       body: currentBody,
@@ -219,6 +230,9 @@ export async function safeFetch(
     if (switchToGet) {
       currentMethod = 'GET';
       currentBody = undefined;
+      for (const h of ['content-type', 'content-length', 'transfer-encoding']) {
+        nextHeaders.delete(h);
+      }
     }
 
     currentUrl = targetURL.toString();

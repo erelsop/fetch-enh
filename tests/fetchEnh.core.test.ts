@@ -1,5 +1,7 @@
 import FetchEnh from '../src';
 import fetchMock from 'jest-fetch-mock';
+import { computeDelay } from '../src/core/retryEngine';
+import { isReplayableBody } from '../src/core/bodyUtils';
 
 beforeEach(() => {
   fetchMock.resetMocks();
@@ -103,7 +105,7 @@ test('multiple response interceptors compose transformations', async () => {
   expect(result).toEqual({ ok: true, a: true, b: true });
 });
 
-// Regression pin for R-1 (silent-drop footgun): a handler that returns the
+// Regression pin for the silent-drop footgun: a handler that returns the
 // result of next() (a no-op resolving to undefined) silently discards any
 // Request mutations it built.  This test documents that behaviour so that any
 // future change to the pipeline semantics is immediately visible.
@@ -522,7 +524,7 @@ describe('clearRequestInterceptors and clearResponseInterceptors', () => {
   });
 });
 
-// ─── Deduplication: unhandledRejection regression (Q-1) ──────────────────────
+// ─── Deduplication: unhandledRejection regression ───────────────────────
 //
 // DeduplicationCache.track() used to call promise.finally(cleanup), which
 // creates a new chained promise that inherits the rejection.  That chained
@@ -553,4 +555,158 @@ test('dedupe: true does not fire unhandledRejection when a deduped request rejec
   } finally {
     process.off('unhandledRejection', unhandledSpy);
   }
+});
+
+// 304 Not Modified should return null instead of throwing.
+test('GET returning 304 Not Modified resolves to null instead of throwing', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+  fetchMock.mockResponseOnce('', { status: 304 });
+  const result = await api.get({ endpoint: '/cached', headers: { 'If-None-Match': 'W/"abc"' } });
+  expect(result).toBeNull();
+});
+
+// computeDelay clamping tests for NaN/Infinity/negative/zero from custom strategies.
+test('computeDelay clamps NaN from a custom BackoffStrategy to 0', () => {
+  const nanStrategy = { computeDelay: () => NaN };
+  const result = computeDelay(1, {}, nanStrategy as any);
+  expect(result).toBe(0);
+});
+
+test('computeDelay clamps Infinity from a custom BackoffStrategy to 0', () => {
+  const infStrategy = { computeDelay: () => Infinity };
+  const result = computeDelay(1, {}, infStrategy as any);
+  expect(result).toBe(0);
+});
+
+test('computeDelay clamps negative value from a custom BackoffStrategy to 0', () => {
+  const negStrategy = { computeDelay: () => -500 };
+  const result = computeDelay(1, {}, negStrategy as any);
+  expect(result).toBe(0);
+});
+
+test('computeDelay preserves 0 from a custom BackoffStrategy (intentional no-delay retry)', () => {
+  const zeroStrategy = { computeDelay: () => 0 };
+  const result = computeDelay(1, {}, zeroStrategy as any);
+  expect(result).toBe(0);
+});
+
+// isReplayableBody tests covering primitive bodies and ReadableStream.
+test('isReplayableBody returns true for boolean body', () => {
+  expect(isReplayableBody(true as any)).toBe(true);
+});
+
+test('isReplayableBody returns true for number body', () => {
+  expect(isReplayableBody(42 as any)).toBe(true);
+});
+
+test('isReplayableBody returns false only for ReadableStream', () => {
+  // jsdom does not expose ReadableStream; install a temporary stand-in so the
+  // `body instanceof ReadableStream` guard inside isReplayableBody can fire.
+  class MockReadableStream {}
+  const orig = (global as any).ReadableStream;
+  (global as any).ReadableStream = MockReadableStream;
+  try {
+    expect(isReplayableBody(new MockReadableStream() as any)).toBe(false);
+  } finally {
+    (global as any).ReadableStream = orig;
+  }
+});
+
+// ─── JsonPrimitive bodies are JSON-encoded with application/json ──────────
+
+describe('JsonPrimitive bodies are JSON-encoded with application/json', () => {
+  function readContentType(init: RequestInit | undefined): string | null {
+    const h = init?.headers as any;
+    if (!h) return null;
+    if (typeof h.get === 'function') return h.get('content-type');
+    // Plain Record<string, string>: search case-insensitively.
+    for (const k of Object.keys(h)) {
+      if (k.toLowerCase() === 'content-type') return h[k];
+    }
+    return null;
+  }
+
+  test('body: 42 (number) sends application/json with body "42"', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({ endpoint: '/x', body: 42 as any });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/json');
+    expect(init.body).toBe('42');
+  });
+
+  test('body: true (boolean) sends application/json with body "true"', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({ endpoint: '/x', body: true as any });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/json');
+    expect(init.body).toBe('true');
+  });
+
+  test('body: false (falsy boolean) sends application/json with body "false"', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({ endpoint: '/x', body: false as any });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/json');
+    expect(init.body).toBe('false');
+  });
+
+  test('body: 0 (falsy number) sends application/json with body "0"', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({ endpoint: '/x', body: 0 as any });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/json');
+    expect(init.body).toBe('0');
+  });
+
+  test('body: "" (falsy string) still sends text/plain (existing string contract)', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({ endpoint: '/x', body: '' as any });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    // Empty string is still a string — contract is text/plain.
+    expect(readContentType(init)).toBe('text/plain;charset=UTF-8');
+    expect(init.body).toBe('');
+  });
+});
+
+// ─── case-insensitive Content-Type lookups in setContentTypeHeader ────────
+
+describe('setContentTypeHeader honours user-supplied lowercase content-type', () => {
+  function readContentType(init: RequestInit | undefined): string | null {
+    const h = init?.headers as any;
+    if (!h) return null;
+    if (typeof h.get === 'function') return h.get('content-type');
+    for (const k of Object.keys(h)) {
+      if (k.toLowerCase() === 'content-type') return h[k];
+    }
+    return null;
+  }
+
+  test('lowercase content-type is preserved for plain object bodies', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({
+      endpoint: '/x',
+      body: { x: 1 },
+      headers: { 'content-type': 'application/xml' },
+    });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/xml');
+  });
+
+  test('lowercase content-type is preserved for string bodies', async () => {
+    const api = new FetchEnh({ baseURL: 'https://api.test', defaultRetries: 0 });
+    fetchMock.mockResponseOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    await api.post({
+      endpoint: '/x',
+      body: 'plain payload',
+      headers: { 'content-type': 'application/custom' },
+    });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(readContentType(init)).toBe('application/custom');
+  });
 });
