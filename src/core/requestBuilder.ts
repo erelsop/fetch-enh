@@ -81,6 +81,16 @@ export function serializeQuery(
 }
 
 /**
+ * Returns `true` when `body` is a `ReadableStream`. The `RequestInit.duplex`
+ * field becomes mandatory on Node ≥ 18 / undici-backed fetch when a stream
+ * body is present; this helper centralises the detection so call-sites can
+ * conditionally attach `duplex: 'half'` to keep the platform happy.
+ */
+function isStreamBody(body: unknown): boolean {
+  return typeof ReadableStream !== 'undefined' && body instanceof ReadableStream;
+}
+
+/**
  * Constructs a fully-formed `Request` object from the given parameters.
  *
  * Responsibilities:
@@ -88,6 +98,8 @@ export function serializeQuery(
  * - Merges default headers with per-request headers.
  * - Delegates body serialization to `bodyUtils` (`setContentTypeHeader` /
  *   `serializeBody`).
+ * - Attaches `duplex: 'half'` when the resolved body is a `ReadableStream`,
+ *   satisfying the Node ≥ 18 / undici `RequestInit.duplex` requirement.
  */
 export function buildRequest(params: BuildRequestParams): Request {
   const {
@@ -136,11 +148,20 @@ export function buildRequest(params: BuildRequestParams): Request {
     adjustedBody = serializeBody(body);
   }
 
-  return new Request(urlString, {
+  const init: RequestInit = {
     method,
     headers: combinedHeaders,
     body: adjustedBody as any,
-  });
+  };
+  // Node ≥ 18 / undici-backed fetch requires `duplex: 'half'` whenever the
+  // body is a `ReadableStream`. The field is not yet in `lib.dom.d.ts`, so
+  // attach it via an `any` cast — it is a no-op on platforms that don't read
+  // it (e.g. browser polyfills).
+  if (isStreamBody(adjustedBody)) {
+    (init as any).duplex = 'half';
+  }
+
+  return new Request(urlString, init);
 }
 
 /** Headers that must not be forwarded to a different origin on redirect. */
@@ -184,13 +205,18 @@ export async function safeFetch(
   const signal = init.signal;
 
   for (let hops = 0; hops <= MAX_REDIRECTS; hops++) {
-    const response = await fetchFn(currentUrl, {
+    const fetchInit: RequestInit = {
       method: currentMethod,
       headers: currentHeaders,
       body: currentBody,
       signal,
       redirect: 'manual',
-    });
+    };
+    // See `buildRequest`: streaming bodies need `duplex: 'half'` on Node ≥ 18.
+    if (isStreamBody(currentBody)) {
+      (fetchInit as any).duplex = 'half';
+    }
+    const response = await fetchFn(currentUrl, fetchInit);
 
     // Not a redirect — return as-is
     if (response.status < 300 || response.status >= 400) return response;

@@ -972,28 +972,37 @@ class FetchEnh {
 }
 
 export default FetchEnh;
+
+// Public type surface — single barrel via `./types/public`. Adding a new
+// public type? Add it to `src/types/public.ts` and it will surface here
+// automatically.
 export type {
   FetchEnhConfig,
-} from './types/config';
-export type {
+  RequestOptions,
   RequestParameters,
   BodyType,
   JsonPrimitive,
   JsonValue,
-} from './types/requestParameters';
-export type {
+  QueryValue,
+  QueryPrimitive,
+  ResponseType,
+  HeadOptions,
+  PaginateOptions,
   GetOptions,
+  MutationOptions,
   PostOptions,
   PutOptions,
   PatchOptions,
   DeleteOptions,
   RawOptions,
-  HeadOptions,
-  PaginateOptions,
-} from './types/httpMethodOptions';
-export type { RequestInterceptor, ResponseInterceptor } from './types/interceptors';
-export type { AuthStrategy, TokenStore } from './types/auth';
-export type { RetryClassifier, BackoffStrategy, RetryConfig } from './types/retry';
+  RequestInterceptor,
+  ResponseInterceptor,
+  AuthStrategy,
+  TokenStore,
+  RetryClassifier,
+  BackoffStrategy,
+  RetryConfig,
+} from './types/public';
 export { MemoryTokenStore, LocalStorageTokenStore } from './auth/tokenStores';
 export { BearerTokenAuth, ApiKeyAuth, BasicAuth, CsrfTokenAuth, OAuth2ClientCredentialsAuth, OAuth2PKCEAuth } from './auth/strategies';
 export { FetchError, TimeoutError, RetryError, UnsupportedResponseTypeError, InterceptorAbortError, AuthAbortError } from './errors/fetchErrors';

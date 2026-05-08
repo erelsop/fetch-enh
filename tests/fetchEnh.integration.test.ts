@@ -243,6 +243,49 @@ test('raw() with body POSTs correctly against real fetch', async () => {
   expect(data.body).toEqual({ hello: 'world' });
 });
 
+// ReadableStream bodies must work with `api.post/put/patch/delete()` on Node
+// ≥ 18 / undici-backed fetch. Earlier builds threw "RequestInit: duplex
+// option is required when sending a body" because `buildRequest` and
+// `safeFetch` both passed a stream body to the underlying fetch without
+// `duplex: 'half'`. The two helpers now detect stream bodies and attach the
+// flag automatically.
+test('post() with ReadableStream body succeeds against real fetch (duplex fix)', async () => {
+  const api = new FetchEnh({ baseURL, defaultRetries: 0 });
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('streamy-payload'));
+      controller.close();
+    },
+  });
+  const res = await api.post<{ method: string; body: unknown }>({
+    endpoint: '/echo',
+    body: stream,
+  });
+  expect(res.method).toBe('POST');
+  // The server JSON.parse-fails on the raw bytes 'streamy-payload', so the
+  // server falls back to returning the raw string for `body`.
+  expect(res.body).toBe('streamy-payload');
+});
+
+test('raw() with ReadableStream body succeeds against real fetch (duplex fix)', async () => {
+  const api = new FetchEnh({ baseURL, defaultRetries: 0 });
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('raw-streamy'));
+      controller.close();
+    },
+  });
+  const res = await api.raw({
+    endpoint: '/echo',
+    method: 'POST',
+    body: stream,
+  });
+  expect(res.status).toBe(200);
+  const data = await res.json() as { method: string; body: unknown };
+  expect(data.method).toBe('POST');
+  expect(data.body).toBe('raw-streamy');
+});
+
 test('raw({ applyMiddleware: true }) with body POSTs correctly through interceptors', async () => {
   const api = new FetchEnh({ baseURL, defaultRetries: 0 });
   api.addRequestInterceptor({
