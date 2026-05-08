@@ -4,8 +4,8 @@
  * Demonstrates advanced retry logic and backoff strategies.
  */
 
-import FetchEnh from 'fetch-enh';
-import type { RetryClassifier, BackoffStrategy } from 'fetch-enh';
+import FetchEnh from '@erelsop/fetch-enh';
+import type { RetryClassifier, BackoffStrategy } from '@erelsop/fetch-enh';
 
 // Example 1: Default Retry Behavior
 async function defaultRetryExample() {

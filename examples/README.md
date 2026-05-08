@@ -90,7 +90,7 @@ node examples/compiled/01-basic-usage.js
 ### Creating an API Client
 
 ```typescript
-import FetchEnh from 'fetch-enh';
+import FetchEnh from '@erelsop/fetch-enh';
 
 const api = new FetchEnh({
   baseURL: 'https://jsonplaceholder.typicode.com',
@@ -128,7 +128,7 @@ await api.delete({ endpoint: '/users/1' });
 ### Adding Authentication
 
 ```typescript
-import { BearerTokenAuth, MemoryTokenStore } from 'fetch-enh';
+import { BearerTokenAuth, MemoryTokenStore } from '@erelsop/fetch-enh';
 
 const tokenStore = new MemoryTokenStore('your-token');
 api.useAuthStrategy(new BearerTokenAuth(
@@ -144,7 +144,7 @@ api.useAuthStrategy(new BearerTokenAuth(
 ### Error Handling
 
 ```typescript
-import { FetchError, TimeoutError } from 'fetch-enh';
+import { FetchError, TimeoutError } from '@erelsop/fetch-enh';
 
 try {
   const data = await api.get({ endpoint: '/data' });

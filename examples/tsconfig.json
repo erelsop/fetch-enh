@@ -6,7 +6,7 @@
     "noEmit": true,
     "baseUrl": "..",
     "paths": {
-      "fetch-enh": ["src/index.ts"]
+      "@erelsop/fetch-enh": ["src/index.ts"]
     }
   },
   "include": ["./**/*.ts"]

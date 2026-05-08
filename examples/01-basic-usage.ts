@@ -4,7 +4,7 @@
  * Demonstrates the fundamental usage of FetchEnh for making HTTP requests.
  */
 
-import FetchEnh from 'fetch-enh';
+import FetchEnh from '@erelsop/fetch-enh';
 
 // Initialize the API client
 const api = new FetchEnh({

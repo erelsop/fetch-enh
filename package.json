@@ -1,5 +1,5 @@
 {
-  "name": "fetch-enh",
+  "name": "@erelsop/fetch-enh",
   "version": "1.0.0",
   "description": "An enhanced fetch utility with built-in retry logic, authentication strategies, request/response interceptors, and intelligent error handling.",
   "main": "dist/index.js",

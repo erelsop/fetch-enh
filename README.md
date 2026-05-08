@@ -19,11 +19,11 @@ An enhanced fetch utility for TypeScript and JavaScript with built-in retries, a
 ## Installation
 
 ```bash
-npm install fetch-enh
+npm install @erelsop/fetch-enh
 # or
-yarn add fetch-enh
+yarn add @erelsop/fetch-enh
 # or
-pnpm add fetch-enh
+pnpm add @erelsop/fetch-enh
 ```
 
 The package ships a dual build:
@@ -34,7 +34,7 @@ The package ships a dual build:
 | `import` / ESM bundlers | `dist/esm/index.js` |
 | TypeScript types | `dist/index.d.ts` (also emitted into `dist/esm/`) |
 
-`dist/esm/` ships with its own `package.json` (`{"type":"module"}`) and `.js`-extended import paths so the ESM output works with native Node.js ESM (`import … from 'fetch-enh'`) without requiring a bundler.
+`dist/esm/` ships with its own `package.json` (`{"type":"module"}`) and `.js`-extended import paths so the ESM output works with native Node.js ESM (`import … from '@erelsop/fetch-enh'`) without requiring a bundler.
 
 Bundlers that respect the `exports` map in `package.json` (Vite, esbuild, Rollup, webpack 5+) will automatically select the correct entry point. Source maps and declaration maps ship in both builds for debuggable production stack traces, and `"sideEffects": false` lets bundlers tree-shake unused exports.
 
@@ -43,7 +43,7 @@ Bundlers that respect the `exports` map in `package.json` (Vite, esbuild, Rollup
 ## Quick Start
 
 ```typescript
-import FetchEnh from 'fetch-enh';
+import FetchEnh from '@erelsop/fetch-enh';
 
 // All config fields are optional; new FetchEnh() with no args is valid.
 const api = new FetchEnh({
@@ -151,7 +151,7 @@ import {
   OAuth2ClientCredentialsAuth,
   OAuth2PKCEAuth,
   MemoryTokenStore,
-} from 'fetch-enh';
+} from '@erelsop/fetch-enh';
 ```
 
 - `BearerTokenAuth(store, refresh)` — sends `Authorization: Bearer <token>`; on 401 invokes `refresh()` (deduplicated across concurrent requests) and retries once.
@@ -297,7 +297,7 @@ FetchEnh throws typed errors. All of them set `name`, expose a `code`, and provi
 | `AuthAbortError` | `EAUTH_ABORT` | An auth strategy's `onRequest` returned `false`. Not retried. |
 
 ```ts
-import { FetchError, TimeoutError, RetryError } from 'fetch-enh';
+import { FetchError, TimeoutError, RetryError } from '@erelsop/fetch-enh';
 
 try {
   await api.get({ endpoint: '/data' });

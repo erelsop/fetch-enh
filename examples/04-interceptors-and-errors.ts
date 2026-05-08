@@ -4,8 +4,8 @@
  * Demonstrates request/response interceptors and error handling patterns.
  */
 
-import FetchEnh from 'fetch-enh';
-import { FetchError, TimeoutError } from 'fetch-enh';
+import FetchEnh from '@erelsop/fetch-enh';
+import { FetchError, TimeoutError } from '@erelsop/fetch-enh';
 
 // Example 1: Logging Interceptor
 async function loggingInterceptorExample() {

@@ -11,7 +11,7 @@ import FetchEnh, {
   CsrfTokenAuth,
   MemoryTokenStore,
   LocalStorageTokenStore 
-} from 'fetch-enh';
+} from '@erelsop/fetch-enh';
 
 // Example 1: Bearer Token Authentication with Auto-Refresh
 async function bearerTokenExample() {
