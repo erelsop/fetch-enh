@@ -1,7 +1,7 @@
 /**
- * New Features in v1.0.0-rc.2
+ * New Features in v1.0.0
  *
- * Demonstrates key features available in FetchEnh v1.0.0-rc.2:
+ * Demonstrates key features available in FetchEnh v1.0.0:
  * - Generic TypeScript support
  * - AbortController support
  * - Enhanced type exports

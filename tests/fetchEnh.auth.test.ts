@@ -105,6 +105,71 @@ describe('Token Stores', () => {
       store.setToken('token');
       expect(localStorage.getItem('my_custom_key')).toBe('token');
     });
+
+    // ── TTL parity with MemoryTokenStore ──────────────────────────────────
+    describe('TTL via setTokenWithExpiry', () => {
+      test('token remains valid before TTL expires', () => {
+        const store = new LocalStorageTokenStore('ttl_key');
+        store.setTokenWithExpiry('tok', 10_000);
+        expect(store.getToken()).toBe('tok');
+        // Sidecar expiry slot is populated with a future timestamp.
+        const raw = localStorage.getItem('ttl_key_expires_at');
+        expect(raw).not.toBeNull();
+        expect(Number(raw)).toBeGreaterThan(Date.now());
+      });
+
+      test('getToken returns null after TTL expires and cleans up both slots', async () => {
+        const store = new LocalStorageTokenStore('ttl_key2');
+        store.setTokenWithExpiry('tok', 30); // 30ms TTL
+        expect(store.getToken()).toBe('tok');
+        await new Promise<void>((r) => setTimeout(r, 50));
+        expect(store.getToken()).toBeNull();
+        // Lazy cleanup on read removed both the token and the sidecar.
+        expect(localStorage.getItem('ttl_key2')).toBeNull();
+        expect(localStorage.getItem('ttl_key2_expires_at')).toBeNull();
+      });
+
+      test('setToken clears any existing TTL sidecar', () => {
+        const store = new LocalStorageTokenStore('ttl_key3');
+        store.setTokenWithExpiry('tok', 10_000);
+        expect(localStorage.getItem('ttl_key3_expires_at')).not.toBeNull();
+        store.setToken('replacement');
+        expect(store.getToken()).toBe('replacement');
+        expect(localStorage.getItem('ttl_key3_expires_at')).toBeNull();
+      });
+
+      test('setTokenWithExpiry(null, ...) clears the store entirely', () => {
+        const store = new LocalStorageTokenStore('ttl_key4');
+        store.setTokenWithExpiry('tok', 10_000);
+        store.setTokenWithExpiry(null);
+        expect(store.getToken()).toBeNull();
+        expect(localStorage.getItem('ttl_key4')).toBeNull();
+        expect(localStorage.getItem('ttl_key4_expires_at')).toBeNull();
+      });
+
+      test('setTokenWithExpiry with ttlMs=null stores token without expiry', () => {
+        const store = new LocalStorageTokenStore('ttl_key5');
+        store.setTokenWithExpiry('tok', null);
+        expect(store.getToken()).toBe('tok');
+        expect(localStorage.getItem('ttl_key5_expires_at')).toBeNull();
+      });
+
+      test('getAll surfaces token + absolute expiresAtMs', () => {
+        const store = new LocalStorageTokenStore('ttl_key6');
+        const before = Date.now();
+        store.setTokenWithExpiry('tok', 5_000);
+        const { token, expiresAtMs } = store.getAll();
+        expect(token).toBe('tok');
+        expect(expiresAtMs).not.toBeNull();
+        expect(expiresAtMs!).toBeGreaterThanOrEqual(before + 5_000);
+        expect(expiresAtMs!).toBeLessThan(before + 6_000);
+      });
+
+      test('getAll returns null/null when nothing is stored', () => {
+        const store = new LocalStorageTokenStore('ttl_key7');
+        expect(store.getAll()).toEqual({ token: null, expiresAtMs: null });
+      });
+    });
   });
 });
 
