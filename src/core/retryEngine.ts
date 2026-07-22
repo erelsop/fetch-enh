@@ -39,7 +39,7 @@ export function defaultBackoffDelay(
     }
   }
   const base = 200;
-  const cap = 2000;
+  const cap = retryConfig.maxBackoffMs ?? 2000;
   const exp = Math.min(base * Math.pow(2, attempt - 1), cap);
   const jitterFactor = 0.7 + Math.random() * 0.6;
   return Math.floor(exp * jitterFactor);

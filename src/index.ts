@@ -48,6 +48,15 @@ import { DeduplicationCache } from './core/deduplication';
 import { paginate, paginateCursor, paginateIter, paginateCursorIter } from './core/pagination';
 
 /**
+ * Marks an error as having been thrown by a response interceptor, so the retry
+ * loop's network-error branch re-throws it untouched instead of retrying it and
+ * wrapping it in a {@link RetryError}. See the `_applyResponseInterceptors`
+ * call site in `_fetchAndParse`.
+ * @internal
+ */
+const FROM_RESPONSE_INTERCEPTOR = Symbol('fetchEnh.fromResponseInterceptor');
+
+/**
  * FetchEnh is a utility class designed to streamline fetch requests.
  * Provides built-in support for handling common tasks like setting up base URLs,
  * managing default headers, setting request timeouts, retrying failed requests,
@@ -220,8 +229,19 @@ class FetchEnh {
       };
       const response = await safeFetch(urlForFetch, initForFetch);
 
-      // Apply response interceptors
-      const interceptedResponse = await this._applyResponseInterceptors(response);
+      // Apply response interceptors. A throw from here is a *deliberate* signal
+      // from user code (e.g. an interceptor that rejects certain payloads), not
+      // a transient network failure — mark it so the catch below re-throws it
+      // untouched rather than retrying it and wrapping it in a RetryError.
+      let interceptedResponse: Response;
+      try {
+        interceptedResponse = await this._applyResponseInterceptors(response);
+      } catch (interceptorErr) {
+        if (interceptorErr && typeof interceptorErr === 'object') {
+          try { (interceptorErr as any)[FROM_RESPONSE_INTERCEPTOR] = true; } catch { /* frozen error — fall through */ }
+        }
+        throw interceptorErr;
+      }
 
       // 304 Not Modified carries no message body (RFC 9110 §15.4.5) but is a
       // valid, non-error response for conditional GET requests. Route it to
@@ -354,6 +374,12 @@ class FetchEnh {
 
       // Known library errors — rethrow as-is (do not treat as network error)
       if (error instanceof UnsupportedResponseTypeError || error instanceof FetchError || error instanceof TimeoutError || error instanceof RetryError || error instanceof InterceptorAbortError || error instanceof AuthAbortError) {
+        throw error;
+      }
+
+      // Errors thrown by a response interceptor are deliberate signals, not
+      // transient network failures — propagate untouched (no retry, no RetryError).
+      if (error && typeof error === 'object' && (error as any)[FROM_RESPONSE_INTERCEPTOR]) {
         throw error;
       }
 
@@ -1005,4 +1031,4 @@ export type {
 } from './types/public';
 export { MemoryTokenStore, LocalStorageTokenStore } from './auth/tokenStores';
 export { BearerTokenAuth, ApiKeyAuth, BasicAuth, CsrfTokenAuth, OAuth2ClientCredentialsAuth, OAuth2PKCEAuth } from './auth/strategies';
-export { FetchError, TimeoutError, RetryError, UnsupportedResponseTypeError, InterceptorAbortError, AuthAbortError } from './errors/fetchErrors';
+export { FetchError, TimeoutError, RetryError, UnsupportedResponseTypeError, InterceptorAbortError, AuthAbortError, PaginationLimitError } from './errors/fetchErrors';

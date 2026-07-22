@@ -1,4 +1,4 @@
-import FetchEnh from '../src';
+import FetchEnh, { PaginationLimitError } from '../src';
 import fetchMock from 'jest-fetch-mock';
 import { computeDelay } from '../src/core/retryEngine';
 import { isReplayableBody } from '../src/core/bodyUtils';
@@ -103,6 +103,22 @@ test('multiple response interceptors compose transformations', async () => {
   fetchMock.mockResponseOnce(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
   const result = await api.get<any>({ endpoint: '/r', responseType: 'json' });
   expect(result).toEqual({ ok: true, a: true, b: true });
+});
+
+// Regression pin for F2: an error thrown by a response interceptor is a
+// deliberate signal, not a transient network failure. It must propagate
+// untouched — not be retried, and not be re-wrapped in a RetryError.
+test('error thrown by a response interceptor propagates untouched (no retry, no RetryError)', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  class CustomSignal extends Error {}
+  api.addResponseInterceptor({
+    handler: () => { throw new CustomSignal('rejected by interceptor'); },
+  });
+  fetchMock.mockResponse(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  await expect(api.get({ endpoint: '/r', responseType: 'json' })).rejects.toThrow(CustomSignal);
+  // Exactly one network call — the throw must not have triggered retries.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 // Regression pin for the silent-drop footgun: a handler that returns the
@@ -411,13 +427,84 @@ test('cursor-based pagination respects maxPages option', async () => {
   expect((results as any[]).length).toBe(8);
 });
 
-test('default page-based pagination cap is 100', async () => {
+test('default page-based safety cap throws rather than silently truncating', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // Each page has exactly 1 item = pageSize, so the server always signals "more
+  // data available" and natural termination never fires. Hitting the default
+  // safety cap while more data remains must throw, not return a partial result.
+  fetchMock.mockResponse(JSON.stringify([1]), { status: 200, headers: { 'content-type': 'application/json' } });
+  await expect(
+    api.get({ endpoint: '/paged-default', page: 1, pageSize: 1, responseType: 'json' })
+  ).rejects.toThrow(PaginationLimitError);
+  // It should still have paged all the way to the cap before throwing.
+  expect(fetchMock).toHaveBeenCalledTimes(100);
+});
+
+test('default page-based cap does NOT throw when data ends exactly at the cap', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // 99 full pages then a short final page: data genuinely ends within the cap,
+  // so this is a natural termination and must not throw.
+  let call = 0;
+  fetchMock.mockResponse(async () => {
+    call++;
+    const body = call < 100 ? JSON.stringify([1, 2]) : JSON.stringify([1]);
+    return { body, init: { status: 200, headers: { 'content-type': 'application/json' } } } as any;
+  });
+  const results = await api.get<number[]>({ endpoint: '/paged-ends', page: 1, pageSize: 2, responseType: 'json' });
+  expect((results as any[]).length).toBe(99 * 2 + 1);
+  expect(fetchMock).toHaveBeenCalledTimes(100);
+});
+
+test('explicit maxPages opts in to silent truncation (no throw)', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   fetchMock.mockResponse(JSON.stringify([1]), { status: 200, headers: { 'content-type': 'application/json' } });
-  await api.get({ endpoint: '/paged-default', page: 1, pageSize: 1, responseType: 'json' });
-  // Each page has exactly 1 item = pageSize, so natural termination never fires.
-  // The maxPages default of 100 should terminate it after 100 fetches.
-  expect(fetchMock).toHaveBeenCalledTimes(100);
+  // Caller explicitly capped at 5 pages while more data exists — this is an
+  // opt-in limit, so it stops silently at 5 without throwing.
+  const results = await api.get<number[]>({
+    endpoint: '/paged-explicit', page: 1, pageSize: 1, maxPages: 5, responseType: 'json',
+  });
+  expect((results as any[]).length).toBe(5);
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+});
+
+test('default cursor safety cap throws rather than silently truncating', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  // Every page returns a next cursor, so more data is always signalled.
+  fetchMock.mockResponse(
+    JSON.stringify({ items: [1], next: 'more' }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+  await expect(
+    api.get<number[]>({
+      endpoint: '/cursor-default',
+      responseType: 'json',
+      cursor: null,
+      getNextCursor: (resp: any) => resp.next,
+      extractor: (resp: any) => resp.items,
+    } as any)
+  ).rejects.toThrow(PaginationLimitError);
+});
+
+test('cursor pagination does NOT throw when the final page has no next cursor', async () => {
+  const api = new FetchEnh({ baseURL: 'https://api.test' });
+  let call = 0;
+  fetchMock.mockResponse(async () => {
+    call++;
+    // Last page (10th) drops the next cursor: genuine end within the cap.
+    const body = call < 10
+      ? JSON.stringify({ items: [1], next: 'more' })
+      : JSON.stringify({ items: [1] });
+    return { body, init: { status: 200, headers: { 'content-type': 'application/json' } } } as any;
+  });
+  const results = await api.get<number[]>({
+    endpoint: '/cursor-ends',
+    responseType: 'json',
+    cursor: null,
+    getNextCursor: (resp: any) => resp.next ?? null,
+    extractor: (resp: any) => resp.items,
+  } as any);
+  expect((results as any[]).length).toBe(10);
+  expect(fetchMock).toHaveBeenCalledTimes(10);
 });
 
 test('config properties are readable via public getters', () => {
@@ -453,20 +540,24 @@ test('writing to getter-backed config property is a type error at compile time',
   expect(api.baseURL).toBe('https://api.test');
 });
 
-test('default cursor-based pagination cap is 100 (not 200)', async () => {
+test('default cursor-based safety cap is 100 pages before it throws', async () => {
   const api = new FetchEnh({ baseURL: 'https://api.test' });
   fetchMock.mockResponse(
     JSON.stringify({ items: [1], next: 'always-next' }),
     { status: 200, headers: { 'content-type': 'application/json' } }
   );
-  await api.get({
-    endpoint: '/cursor-default',
-    responseType: 'json',
-    cursor: null,
-    getNextCursor: (resp: any) => resp.next,
-    extractor: (resp: any) => resp.items,
-  } as any);
-  // Previously capped at 201; new default is 100.
+  // A never-ending cursor stream: hitting the default cap while more data is
+  // signalled throws rather than silently truncating, but only after paging
+  // all the way to the 100-page cap.
+  await expect(
+    api.get({
+      endpoint: '/cursor-default',
+      responseType: 'json',
+      cursor: null,
+      getNextCursor: (resp: any) => resp.next,
+      extractor: (resp: any) => resp.items,
+    } as any)
+  ).rejects.toThrow(PaginationLimitError);
   expect(fetchMock).toHaveBeenCalledTimes(100);
 });
 

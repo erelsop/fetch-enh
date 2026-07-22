@@ -1,7 +1,15 @@
 import type { RequestParameters, QueryValue, ResponseType } from '../types/requestParameters';
 import type { PaginateOptions } from '../types/httpMethodOptions';
 import type { RequestOptions } from '../types/requestOptions';
-import { UnsupportedResponseTypeError } from '../errors/fetchErrors';
+import { UnsupportedResponseTypeError, PaginationLimitError } from '../errors/fetchErrors';
+
+/**
+ * Built-in safety cap applied when the caller does not pass an explicit
+ * `maxPages`. Reaching it while more data is still available throws a
+ * {@link PaginationLimitError} rather than silently truncating — see that
+ * class for the rationale.
+ */
+export const DEFAULT_MAX_PAGES = 100;
 
 export function parseLinkHeaderForNextCursor(headers: Headers, cursorParamName: string): string | null {
   const link = headers.get('link'); // Headers.get() is case-insensitive per Fetch spec
@@ -88,10 +96,15 @@ export async function* paginateIter<T = any>(
     page,
     pageSize,
     limit,
-    maxPages = 100,
+    maxPages: explicitMaxPages,
     extractor,
     options: callOptions,
   } = options;
+
+  // Distinguish a caller-supplied cap (opt-in: stop silently at N) from the
+  // built-in safety cap (throw on overflow rather than truncate silently).
+  const capIsExplicit = explicitMaxPages !== undefined;
+  const maxPages = explicitMaxPages ?? DEFAULT_MAX_PAGES;
 
   // Pagination only works for JSON responses. Fail fast rather than silently
   // yielding zero pages, which would be indistinguishable from an empty result.
@@ -149,7 +162,15 @@ export async function* paginateIter<T = any>(
           yield pageItems;
         }
 
-        if (pageItems.length < pageSize || ++iterations >= maxPages) break;
+        // A short page means the server has no more data — natural, silent end.
+        if (pageItems.length < pageSize) break;
+        // A full page means more data likely remains. If we've hit the cap here,
+        // truncating would silently drop records: throw unless the caller opted
+        // into an explicit maxPages.
+        if (++iterations >= maxPages) {
+          if (!capIsExplicit) throw new PaginationLimitError(maxPages);
+          break;
+        }
         currentPage++;
       } else {
         break;
@@ -213,7 +234,7 @@ export async function* paginateCursorIter<T = any>(
     query = {},
     responseType = 'json',
     limit,
-    maxPages = 100,
+    maxPages: explicitMaxPages,
     cursor: initialCursor = null,
     cursorParamName = 'cursor',
     getNextCursor,
@@ -221,6 +242,11 @@ export async function* paginateCursorIter<T = any>(
     extractor,
     options: perCallOptions,
   } = params;
+
+  // Distinguish a caller-supplied cap (opt-in: stop silently at N) from the
+  // built-in safety cap (throw on overflow rather than truncate silently).
+  const capIsExplicit = explicitMaxPages !== undefined;
+  const maxPages = explicitMaxPages ?? DEFAULT_MAX_PAGES;
 
   // Pagination only works for JSON responses regardless of which cursor
   // strategy (`useLinkHeader`, `getNextCursor`, or plain) is in use. Fail
@@ -303,7 +329,15 @@ export async function* paginateCursorIter<T = any>(
         yield pageItems;
       }
 
-      if (!nextCursor || ++iterations >= maxPages) break;
+      // No next cursor means the server has no more data — natural, silent end.
+      if (!nextCursor) break;
+      // A next cursor means more data remains. If we've hit the cap here,
+      // truncating would silently drop records: throw unless the caller opted
+      // into an explicit maxPages.
+      if (++iterations >= maxPages) {
+        if (!capIsExplicit) throw new PaginationLimitError(maxPages);
+        break;
+      }
       cursor = nextCursor;
     }
   } finally {
