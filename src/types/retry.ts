@@ -21,6 +21,13 @@ export interface RetryConfig {
   readonly respectRetryAfter?: boolean; // consider Retry-After header (429/503)
   readonly allowUnsafeRetries?: boolean; // allow retries for POST/DELETE when true or when idempotencyKeyFactory present
   readonly idempotencyKeyFactory?: () => string; // generate Idempotency-Key header on retry
+  /**
+   * Upper bound (ms) for the built-in exponential backoff. Default 2000.
+   * Raise this to ride out sustained 429 bursts on long-running paginated
+   * pulls. Does not apply to a `Retry-After` header value (which is capped
+   * separately at 60s) or to a custom {@link BackoffStrategy}.
+   */
+  readonly maxBackoffMs?: number;
 }
 
 

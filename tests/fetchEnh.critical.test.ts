@@ -407,6 +407,26 @@ describe('Retry-After date-string backoff path', () => {
   });
 });
 
+describe('configurable backoff cap (maxBackoffMs)', () => {
+  test('default exponential backoff caps at 2000 ms', () => {
+    // High attempt count would blow past 2s uncapped (200 * 2^9 = 102400).
+    const delay = defaultBackoffDelay(10, { idempotentOnly: true, respectRetryAfter: true });
+    // cap 2000 * jitter (0.7–1.3) → ≤ 2600
+    expect(delay).toBeLessThanOrEqual(2_600);
+    expect(delay).toBeGreaterThan(0);
+  });
+
+  test('maxBackoffMs raises the cap for sustained bursts', () => {
+    const delay = defaultBackoffDelay(
+      10,
+      { idempotentOnly: true, respectRetryAfter: true, maxBackoffMs: 30_000 },
+    );
+    // Now capped at 30000 * jitter (0.7–1.3) → 21000–39000, far above the 2s default.
+    expect(delay).toBeGreaterThan(2_600);
+    expect(delay).toBeLessThanOrEqual(39_000);
+  });
+});
+
 describe('concurrent auth-refresh deduplication', () => {
   test('BearerTokenAuth: concurrent onAuthError calls invoke refresh only once', async () => {
     let resolveRefresh!: (token: string | null) => void;

@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [1.1.0] — 2026-07-22
+
+Data-integrity and resilience release. One behavioural change to pagination
+(previously silent truncation now throws) plus two additive configuration
+options. No public type or method was removed or renamed.
+
+### Changed — Pagination no longer silently truncates ⚠️
+
+- Page-based and cursor-based pagination previously stopped at the built-in
+  `maxPages` safety cap (default **100**) and returned a **truncated** result
+  set with no signal. At common page sizes this silently dropped data — e.g.
+  paging 100 000 records at 1 000/page hits exactly 100 pages and returned only
+  the first 100 000... but any dataset larger than `pageSize × 100` came back
+  short with no error.
+- Now: reaching the **default** cap while the server still reports more data
+  throws the new **`PaginationLimitError`** instead of returning a partial
+  array. This converts silent data loss into a loud, actionable failure.
+- **Opt-in escape hatch:** passing an **explicit** `maxPages` (any number, or
+  `maxPages: Infinity` for unbounded) is treated as a deliberate limit and
+  stops silently at that page count **without** throwing — unchanged from 1.0.0
+  for callers who already set `maxPages`.
+- **Migration:** callers who never set `maxPages` and relied on the implicit
+  100-page stop should either pass an explicit `maxPages` to restore the old
+  silent behaviour, or (recommended) raise/remove the cap with
+  `maxPages: Infinity` and page the full set. Callers already passing
+  `maxPages` are unaffected.
+
+### Added
+
+- **`PaginationLimitError`** — thrown when the default pagination safety cap is
+  reached with more data available (see above). Exported from the package root;
+  carries `code: 'EPAGINATION_LIMIT'` and `maxPages`. Like `InterceptorAbortError`
+  it is intentionally **not** retried by the retry loop.
+- **`RetryConfig.maxBackoffMs`** — configurable upper bound (ms) for the
+  built-in exponential backoff (default **2000**, unchanged). Raise it to ride
+  out sustained `429` bursts on long paginated pulls. Does not affect a
+  `Retry-After` header value (capped separately at 60 s) or a custom
+  `BackoffStrategy`.
+
+### Fixed
+
+- **Errors thrown by a response interceptor are no longer misclassified as
+  transient network failures.** Previously, if a `ResponseInterceptor` handler
+  threw, the retry loop caught it, retried the request, and ultimately wrapped
+  it in a `RetryError` — obscuring the original error and issuing pointless
+  retries. Such a throw is now recognised as a deliberate signal and propagates
+  untouched (no retry, no `RetryError` wrapping), consistent with how
+  `InterceptorAbortError` is already handled.
+
 ## [1.0.0] — 2026-05-08
 
 First public release of FetchEnh. The public surface documented below is
@@ -348,5 +397,6 @@ PKCE refresh recovery, full type-system rigor across primitive bodies and
 JSON encoding, and `duplex: 'half'` propagation for `ReadableStream`
 bodies — is captured here as the canonical first set of release notes.
 
-[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/erelsop/fetch-enh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/erelsop/fetch-enh/releases/tag/v1.0.0

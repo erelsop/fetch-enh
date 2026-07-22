@@ -145,6 +145,42 @@ export class RetryError extends Error {
 }
 
 /**
+ * Thrown when cursor/page pagination reaches the built-in safety cap
+ * (`maxPages`) while the server still reports more data to fetch, and the
+ * caller did **not** explicitly opt into a page limit.
+ *
+ * The safety cap exists to stop a misconfigured `getNextCursor` from looping
+ * forever. Silently returning a truncated result set, however, is worse than
+ * failing: a caller paging 100 000 records at 1 000/page hits exactly 100
+ * pages and would otherwise receive a confidently-wrong partial dataset. This
+ * error converts that silent truncation into a loud, actionable failure.
+ *
+ * To page past the cap deliberately, pass an explicit `maxPages` (any number,
+ * or `Infinity` for unbounded) — an explicit value is treated as an opt-in and
+ * stops silently at the requested page count without throwing.
+ *
+ * Kept separate from plain `Error` so the retry loop in `_fetchAndParse` does
+ * not treat it as a transient network failure and re-attempt the request.
+ */
+export class PaginationLimitError extends Error {
+  code: string;
+  /** The page cap that was reached. */
+  maxPages: number;
+  constructor(maxPages: number, message?: string) {
+    super(
+      message ??
+      `Pagination stopped after reaching the default safety cap of ${maxPages} pages ` +
+      `while more data was still available. Pass an explicit \`maxPages\` ` +
+      `(e.g. \`maxPages: Infinity\` for unbounded) to page past this limit, ` +
+      `or narrow the query.`
+    );
+    this.name = 'PaginationLimitError';
+    this.code = 'EPAGINATION_LIMIT';
+    this.maxPages = maxPages;
+  }
+}
+
+/**
  * Thrown when a request or response interceptor returns `false` to halt the chain.
  * Kept separate from plain `Error` so the retry loop in `_fetchAndParse` does not
  * treat it as a transient network failure and re-attempt the request.
