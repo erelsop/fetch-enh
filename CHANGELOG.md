@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [1.2.0] — 2026-07-22
+
+Adds an optional client-side request governor for staying within an upstream
+API's rate and concurrency limits during large or bursty workloads (e.g.
+long paginated pulls). Purely additive — no behavioural change when the new
+options are omitted.
+
+### Added
+
+- **`FetchEnhConfig.concurrency`** — caps the number of logical requests in
+  flight at once with a fair FIFO semaphore. Applied **once per logical
+  request**, not per retry attempt, so a request does not hold a slot while it
+  sleeps between retries.
+- **`FetchEnhConfig.maxRps`** — caps requests started per second, enforced as a
+  minimum spacing (`1000 / maxRps` ms) between request starts.
+- **`FetchEnhConfig.minIntervalMs`** — explicit minimum spacing (ms) between
+  request starts; takes precedence over `maxRps`.
+- All three are also accepted by **`setConfig(...)`**, which rebuilds the
+  governor with the merged values.
+- Both gates honour a request's `AbortSignal`: a cancelled request waiting in
+  the concurrency queue rejects promptly with an `AbortError` and never runs.
+- When none of the three options is set, the governor is a zero-overhead
+  pass-through.
+
 ## [1.1.0] — 2026-07-22
 
 Data-integrity and resilience release. One behavioural change to pagination
@@ -397,6 +421,7 @@ PKCE refresh recovery, full type-system rigor across primitive bodies and
 JSON encoding, and `duplex: 'half'` propagation for `ReadableStream`
 bodies — is captured here as the canonical first set of release notes.
 
-[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/erelsop/fetch-enh/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/erelsop/fetch-enh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/erelsop/fetch-enh/releases/tag/v1.0.0

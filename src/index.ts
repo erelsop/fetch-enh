@@ -45,6 +45,7 @@ import {
   classifyRetry,
 } from './core/retryEngine';
 import { DeduplicationCache } from './core/deduplication';
+import { RequestGovernor, type GovernorOptions } from './core/governor';
 import { paginate, paginateCursor, paginateIter, paginateCursorIter } from './core/pagination';
 
 /**
@@ -98,6 +99,8 @@ class FetchEnh {
   private _interceptors = new InterceptorPipeline();
   private _auth = new AuthPipeline();
   private _dedupeCache = new DeduplicationCache();
+  private _governorOpts: GovernorOptions = {};
+  private _governor = new RequestGovernor();
 
   constructor({
     baseURL = '',
@@ -107,6 +110,9 @@ class FetchEnh {
     queryStyle,
     dedupe,
     dedupeKey,
+    concurrency,
+    maxRps,
+    minIntervalMs,
     onRetry,
     onComplete,
   }: FetchEnhConfig = {}) {
@@ -126,6 +132,8 @@ class FetchEnh {
     if (dedupeKey) this._dedupeKey = dedupeKey;
     if (onRetry) this._onRetry = onRetry;
     if (onComplete) this._onComplete = onComplete;
+    this._governorOpts = { concurrency, maxRps, minIntervalMs };
+    this._governor = new RequestGovernor(this._governorOpts);
   }
 
   // ── Interceptor delegation ────────────────────────────────────────────────
@@ -487,31 +495,39 @@ class FetchEnh {
     // Wrap interceptors + _fetchAndParse in a synchronously-created promise so that
     // dedup tracking can happen before the first `await`. If we awaited interceptors
     // inline here, a concurrent identical request could slip past the dedup check
-    // during the async gap and produce a duplicate in-flight request.
+    // during the async gap and produce a duplicate in-flight request. `governor.run`
+    // returns its promise synchronously, so dedup tracking below still runs before
+    // any await; deduplicated callers share the single governed request.
+    //
+    // The governor gates each *logical* request (concurrency + rate spacing) once,
+    // outside the retry loop, so a request does not hold a concurrency slot while
+    // it sleeps between retries. When no limits are configured it is a pass-through.
     //
     // Request interceptors run once per logical call (here, inside the IIFE).
     // Auth strategies run once per attempt inside _fetchAndParse so that a token
     // refresh during a retry window takes effect immediately.
-    const startTime = Date.now();
-    const promise = (async (): Promise<T> => {
-      const interceptedRequest = await this._applyRequestInterceptors(request);
-      return this._fetchAndParse(
-        interceptedRequest,
-        responseType,
-        retries,
-        timeout,
-        signal,
-        1,
-        startTime,
-        {
-          method: methodUpper,
-          bodyFactory,
-          bodyReplayable,
-          rawBody,
-        },
-        callRetryConfig
-      ) as Promise<T>;
-    })();
+    const promise = this._governor.run<T>(() => {
+      const startTime = Date.now();
+      return (async (): Promise<T> => {
+        const interceptedRequest = await this._applyRequestInterceptors(request);
+        return this._fetchAndParse(
+          interceptedRequest,
+          responseType,
+          retries,
+          timeout,
+          signal,
+          1,
+          startTime,
+          {
+            method: methodUpper,
+            bodyFactory,
+            bodyReplayable,
+            rawBody,
+          },
+          callRetryConfig
+        ) as Promise<T>;
+      })();
+    }, signal);
 
     if (shouldDedupe) {
       this._dedupeCache.track(dedupeKey, promise);
@@ -899,7 +915,8 @@ class FetchEnh {
   setConfig(config: FetchEnhConfig): void {
     const knownKeys = new Set<string>([
       'baseURL', 'defaultHeaders', 'defaultTimeout', 'defaultRetries',
-      'queryStyle', 'dedupe', 'dedupeKey', 'onRetry', 'onComplete',
+      'queryStyle', 'dedupe', 'dedupeKey', 'concurrency', 'maxRps',
+      'minIntervalMs', 'onRetry', 'onComplete',
     ]);
     for (const key of Object.keys(config)) {
       if (!knownKeys.has(key)) {
@@ -936,6 +953,17 @@ class FetchEnh {
     }
     if ('onComplete' in config) {
       this._onComplete = config.onComplete;
+    }
+    // Rebuild the governor if any of its inputs changed. A fresh governor starts
+    // with an empty queue and reset rate clock; avoid changing these mid-flight
+    // while requests are queued.
+    if ('concurrency' in config || 'maxRps' in config || 'minIntervalMs' in config) {
+      this._governorOpts = {
+        concurrency: 'concurrency' in config ? config.concurrency : this._governorOpts.concurrency,
+        maxRps: 'maxRps' in config ? config.maxRps : this._governorOpts.maxRps,
+        minIntervalMs: 'minIntervalMs' in config ? config.minIntervalMs : this._governorOpts.minIntervalMs,
+      };
+      this._governor = new RequestGovernor(this._governorOpts);
     }
   }
 
