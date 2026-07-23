@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [1.2.1] — 2026-07-22
+
+### Fixed
+
+- **`BearerTokenAuth` no longer discards a valid token when a refresh yields
+  nothing.** On a 401/403, `onAuthError` invoked the refresh callback and then
+  called `store.setToken(newToken ?? null)` — so a refresh that returned `null`
+  (no refresh configured, or an error a refresh cannot fix, such as a permission
+  `403`) overwrote the still-valid token with `null`. Every subsequent request
+  then went out with no `Authorization` header and failed with `401`, turning a
+  single permission error into a cascade of unauthenticated failures across
+  unrelated requests. The stored token is now left untouched unless the refresh
+  actually produces a new one; the failing request still surfaces its original
+  error. Regression test added.
+
 ## [1.2.0] — 2026-07-22
 
 Adds an optional client-side request governor for staying within an upstream
@@ -421,7 +436,8 @@ PKCE refresh recovery, full type-system rigor across primitive bodies and
 JSON encoding, and `duplex: 'half'` propagation for `ReadableStream`
 bodies — is captured here as the canonical first set of release notes.
 
-[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/erelsop/fetch-enh/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/erelsop/fetch-enh/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/erelsop/fetch-enh/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/erelsop/fetch-enh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/erelsop/fetch-enh/releases/tag/v1.0.0

@@ -464,4 +464,29 @@ describe('concurrent auth-refresh deduplication', () => {
     // Both callers should have received a valid retry response
     expect(retryFn).toHaveBeenCalledTimes(2);
   });
+
+  test('BearerTokenAuth: a null refresh result preserves the existing token (no clobber)', async () => {
+    // A no-op refresh (returns null) must NOT overwrite the still-valid stored
+    // token. Otherwise a single 401/403 strips auth from every later request,
+    // turning one permission error into a cascade of unauthenticated failures.
+    const store = new MemoryTokenStore('valid-token');
+    const refresh = jest.fn(async () => null);
+    const auth = new BearerTokenAuth(store, refresh);
+
+    const req = new Request('https://api.test/forbidden');
+    const res = new Response('Forbidden', { status: 403 });
+    const retryFn = jest.fn(async (r: Request) => new Response('', { status: 200 }));
+
+    // onAuthError gives up (no new token) and does not retry.
+    const result = await auth.onAuthError(req, res, retryFn);
+    expect(result).toBeUndefined();
+    expect(retryFn).not.toHaveBeenCalled();
+
+    // Crucially, the original token survives for the next request.
+    expect(await store.getToken()).toBe('valid-token');
+
+    // And onRequest still attaches it.
+    const decorated = await auth.onRequest(new Request('https://api.test/next'));
+    expect((decorated as Request).headers.get('Authorization')).toBe('Bearer valid-token');
+  });
 });
