@@ -112,7 +112,13 @@ export class BearerTokenAuth implements AuthStrategy {
     if (!this.refreshingPromise) {
       this.refreshingPromise = this.refresh()
         .then(async (newToken) => {
-          await this.store.setToken(newToken ?? null);
+          // Only persist a *successful* refresh. A null/empty result means the
+          // refresh could not produce a new token (e.g. no refresh configured,
+          // or a 403 that a refresh cannot fix) — in that case leave the stored
+          // token untouched. Overwriting it with null would strip the still-valid
+          // token from every subsequent request, turning one 401/403 into a
+          // cascade of unauthenticated failures.
+          if (newToken) await this.store.setToken(newToken);
           return newToken ?? null;
         })
         .finally(() => {
@@ -120,7 +126,7 @@ export class BearerTokenAuth implements AuthStrategy {
         });
     }
     const token = await this.refreshingPromise;
-    if (!token) return; // give up; let caller handle error
+    if (!token) return; // give up; let caller handle the original error
 
     const headers = new Headers(request.headers);
     headers.set('Authorization', `Bearer ${token}`);
